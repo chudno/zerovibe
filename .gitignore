@@ -11,3 +11,11 @@ zerovibe
 .env
 .DS_Store
 .idea/
+
+# terraform (стейт и кэш не коммитим; .terraform.lock.hcl — коммитим)
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
