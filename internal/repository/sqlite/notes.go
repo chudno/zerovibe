@@ -1,0 +1,109 @@
+// Package sqlite — реализация портов usecase поверх SQLite.
+//
+// КЛЮЧЕВОЙ ПАТТЕРН: записи (Create/Delete) идут через db.Write — попадают в
+// единую writer-горутину и сериализуются (нет SQLITE_BUSY). Чтения (List) идут
+// через db.Read — параллельно. Конвертация domain↔строка БД — в этом слое.
+//
+// ОБРАЗЕЦ ДЛЯ ГЕНЕРАЦИИ: на каждую сущность — свой репозиторий, реализующий
+// порт из usecase. INSERT/UPDATE/DELETE оборачивать в db.Write, SELECT — в db.Read.
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+
+	"github.com/chudno/zerovibe/internal/domain"
+)
+
+// Schema — DDL схемы заметок (idempotent). Применяется при старте через db.Migrate.
+const Schema = `
+CREATE TABLE IF NOT EXISTS notes (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	title      TEXT NOT NULL,
+	body       TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`
+
+// writer — минимальный интерфейс к платформенному db.DB (Write/Read).
+// Принимаем интерфейсом, а не *db.DB, чтобы репозиторий было легко тестировать.
+type writer interface {
+	Write(ctx context.Context, fn func(*sql.DB) error) error
+	Read(fn func(*sql.DB) error) error
+}
+
+// NoteRepo — SQLite-репозиторий заметок.
+type NoteRepo struct {
+	db writer
+}
+
+// NewNoteRepo собирает репозиторий поверх платформенного db.
+func NewNoteRepo(db writer) *NoteRepo {
+	return &NoteRepo{db: db}
+}
+
+// Create вставляет заметку (через очередь записи) и возвращает её с id и
+// проставленным базой created_at — чтобы фрагмент сразу показывал время.
+func (r *NoteRepo) Create(ctx context.Context, n domain.Note) (domain.Note, error) {
+	err := r.db.Write(ctx, func(s *sql.DB) error {
+		var created string
+		// RETURNING поддерживается SQLite ≥3.35 (есть в modernc) — отдаёт id и
+		// время одним запросом, без отдельного SELECT.
+		err := s.QueryRowContext(ctx,
+			`INSERT INTO notes (title, body) VALUES (?, ?) RETURNING id, created_at`,
+			n.Title, n.Body,
+		).Scan(&n.ID, &created)
+		if err != nil {
+			return fmt.Errorf("insert note: %w", err)
+		}
+		n.CreatedAt = parseTime(created)
+		return nil
+	})
+	if err != nil {
+		return domain.Note{}, err
+	}
+	return n, nil
+}
+
+// List возвращает заметки, новые сверху.
+func (r *NoteRepo) List(ctx context.Context) ([]domain.Note, error) {
+	var notes []domain.Note
+	err := r.db.Read(func(s *sql.DB) error {
+		rows, err := s.QueryContext(ctx,
+			`SELECT id, title, body, created_at FROM notes ORDER BY id DESC`)
+		if err != nil {
+			return fmt.Errorf("select notes: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var n domain.Note
+			var created string
+			if err := rows.Scan(&n.ID, &n.Title, &n.Body, &created); err != nil {
+				return fmt.Errorf("scan note: %w", err)
+			}
+			n.CreatedAt = parseTime(created)
+			notes = append(notes, n)
+		}
+		return rows.Err()
+	})
+	return notes, err
+}
+
+// Delete удаляет заметку по id (через очередь записи).
+func (r *NoteRepo) Delete(ctx context.Context, id int64) error {
+	return r.db.Write(ctx, func(s *sql.DB) error {
+		res, err := s.ExecContext(ctx, `DELETE FROM notes WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("delete note: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return domain.ErrNotFound{Entity: "note", ID: id}
+		}
+		return nil
+	})
+}

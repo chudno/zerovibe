@@ -1,0 +1,13 @@
+# бинари
+/bin/
+zerovibe
+
+# локальная БД SQLite
+*.db
+*.db-wal
+*.db-shm
+
+# среда/редакторы
+.env
+.DS_Store
+.idea/
