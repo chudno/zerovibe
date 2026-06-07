@@ -71,6 +71,7 @@ func TestStaticServed(t *testing.T) {
 		"frankenui-utilities.min.css",
 		"frankenui-core.iife.js",
 		"frankenui-icon.iife.js",
+		"frankenui-chart.iife.js",
 	} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", "/static/"+name, nil))

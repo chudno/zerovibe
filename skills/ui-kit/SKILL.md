@@ -17,6 +17,7 @@ description: UI-кит Zerovibe — Franken UI (shadcn-вид на UIkit) для
 - `frankenui-core.min.css` + `frankenui-utilities.min.css` — стили и utility-классы.
 - `frankenui-core.iife.js` — компоненты (модалки, дропдауны, табы и т.п.).
 - `frankenui-icon.iife.js` — иконки `<uk-icon>`.
+- `frankenui-chart.iife.js` — графики `<uk-chart>` (ApexCharts под капотом).
 - `htmx.min.js` — интерактивность.
 
 Тема выставляется инлайн-скриптом в `<head>`: по умолчанию **тёмная** (`dark` на
@@ -50,6 +51,7 @@ description: UI-кит Zerovibe — Franken UI (shadcn-вид на UIkit) для
 | Алерт | `<div class="uk-alert">` (+ `uk-alert-destructive`) |
 | Бейдж | `<span class="uk-badge">` |
 | Таблица | `<table class="uk-table">` |
+| График | `<uk-chart>` (см. `contexts/chart.md`, `chart-line.md`, `chart-area.md`) |
 | Контейнер страницы | `<div class="uk-container uk-container-small">` |
 
 Эталон применения — в `internal/transport/web/templates/` (`layout.html`, `notes.html`,
