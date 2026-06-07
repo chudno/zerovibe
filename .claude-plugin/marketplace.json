@@ -7,7 +7,10 @@
   "plugins": [
     {
       "name": "zerovibe",
-      "source": ".",
+      "source": {
+        "source": "github",
+        "repo": "chudno/zerovibe"
+      },
       "description": "Создавай приложения с ИИ и публикуй на платформе Zerovibe одной командой (install → new → deploy)."
     }
   ]
