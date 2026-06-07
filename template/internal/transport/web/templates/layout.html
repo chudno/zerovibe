@@ -11,19 +11,16 @@
 	<link rel="stylesheet" href="/static/frankenui-core.min.css">
 	<link rel="stylesheet" href="/static/frankenui-utilities.min.css">
 
-	<!-- Тема Franken UI. Выставляем ДО рендера body, чтобы не было вспышки светлой
-	     темы. По умолчанию — тёмная (фирменный вид Zerovibe), тема zinc. Запоминаем
-	     выбор пользователя в localStorage под ключом __FRANKEN__. -->
+	<!-- Тема Franken UI. Выставляем ДО рендера body, чтобы не было вспышки. Светлая
+	     или тёмная — по системной настройке пользователя (prefers-color-scheme),
+	     с уважением явного выбора из localStorage (__FRANKEN__). Не навязываем. -->
 	<script>
 		(function () {
 			var html = document.documentElement;
 			var saved = JSON.parse(localStorage.getItem("__FRANKEN__") || "{}");
-			// Zerovibe по умолчанию тёмный; уважаем явный выбор пользователя.
-			if (saved.mode === "light") {
-				html.classList.remove("dark");
-			} else {
-				html.classList.add("dark");
-			}
+			var dark = saved.mode === "dark" ||
+				(!saved.mode && window.matchMedia("(prefers-color-scheme: dark)").matches);
+			html.classList.toggle("dark", dark);
 			html.classList.add(saved.theme || "uk-theme-zinc");
 			html.classList.add(saved.radii || "uk-radii-md");
 			html.classList.add(saved.shadows || "uk-shadows-sm");
@@ -33,9 +30,11 @@
 
 	<script type="module" src="/static/frankenui-core.iife.js"></script>
 	<script type="module" src="/static/frankenui-icon.iife.js"></script>
-	<!-- Графики (ApexCharts под капотом). Компонент <uk-chart>. Локально, без CDN. -->
-	<script type="module" src="/static/frankenui-chart.iife.js"></script>
 	<script src="/static/htmx.min.js"></script>
+	<!-- Графики (<uk-chart>) НЕ подключены: скрипт большой (~0.5 МБ), нужен редко.
+	     Понадобился график — добавь <script type="module" src="/static/frankenui-chart.iife.js">
+	     и положи файл в static/ (см. skill ui-kit). -->
+
 </head>
 <body class="bg-background text-foreground">
 	<div class="uk-container uk-container-small" style="padding-block: 48px;">
