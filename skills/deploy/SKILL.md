@@ -11,7 +11,7 @@ description: Задеплоить приложение на платформу Z
 ## Предусловия (проверь и направь, если чего-то нет)
 
 - **Ключ настроен**: `~/.zerovibe/config.json` существует. Нет → `/zerovibe:install`.
-- **Папка привязана к проекту**: в `.env` есть `ZEROVIBE_PROJECT`. Нет → `/zerovibe:new`.
+- **Папка привязана к проекту**: в `.env` есть `ZEROVIBE_PROJECT`. Нет → `/zerovibe:init`.
 - **В корне есть `Dockerfile`** (multi-stage, distroless, без CGO — как в эталонном
   скелете; приложение слушает `:8080`).
 
