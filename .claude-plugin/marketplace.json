@@ -1,14 +1,14 @@
 {
   "name": "zerovibe",
   "owner": {
-    "name": "zerovibe",
+    "name": "Zerovibe",
     "url": "https://zerovibe.ru"
   },
   "plugins": [
     {
       "name": "zerovibe",
-      "source": "./plugin",
-      "description": "Создавай приложения с ИИ и публикуй на платформе zerovibe одной командой (install → new → deploy)."
+      "source": ".",
+      "description": "Создавай приложения с ИИ и публикуй на платформе Zerovibe одной командой (install → new → deploy)."
     }
   ]
 }
