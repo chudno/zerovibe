@@ -1,0 +1,16 @@
+# бинарь
+/bin/
+zerovibe
+
+# локальная БД SQLite
+*.db
+*.db-wal
+*.db-shm
+
+# секреты/привязка к платформе (создаётся /zerovibe:new и /zerovibe:install)
+.env
+
+# среда/редакторы
+.DS_Store
+.idea/
+tmp/

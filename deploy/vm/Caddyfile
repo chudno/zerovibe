@@ -1,8 +1,0 @@
-# Домен подставляется из переменной окружения APP_DOMAIN (её задаёт cloud-init
-# через docker compose). Caddy на этом домене:
-#   - сам выпускает и продлевает Let's Encrypt TLS (нужен валидный A-record → IP VM);
-#   - проксирует на внутренний сервис app:8080.
-{$APP_DOMAIN} {
-	encode gzip
-	reverse_proxy app:8080
-}

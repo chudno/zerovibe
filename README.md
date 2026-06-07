@@ -1,55 +1,75 @@
-# zerovibe — эталонный стартер Go + HTMX
+# Плагин zerovibe для Claude Code
 
-Reference-приложение: веб-приложение на **Go + HTMX + SQLite** с чистой
-архитектурой. Это образец, по которому генерируются новые фичи. Минимальный, но
-полный вертикальный срез: одна сущность (`Note`) проведена через все слои.
+Даёт Claude Code всё, чтобы строить и деплоить приложения на стэке
+**Go + HTMX + SQLite** по эталону zerovibe — от первой фичи до прод-деплоя на
+`<поддомен>.zerovibe.ru` с авто-TLS.
 
-Деплой: один Docker-контейнер на инстанс, SQLite в volume. Stateless-логика +
-один файл данных — просто поднять, просто бэкапить (копия файла).
+## Быстрый старт (для вайбкодера)
 
-## Стэк
+1. **Получи доступ.** Оставь заявку на https://zerovibe.ru — мы заведём аккаунт и
+   пришлём данные для входа.
+2. **Создай ключ.** Войди в кабинет → раздел «Ключи» (`/app/keys`) → «Создать ключ»,
+   скопируй секрет (показывается один раз).
+3. **Поставь плагин** (в Claude Code):
+   ```
+   /plugin marketplace add chudin/zerovibe
+   /plugin install zerovibe@zerovibe
+   ```
+   (или локально для разработки: `claude --plugin-dir ./plugin`)
+4. **Подключи ключ** (один раз на машину):
+   ```
+   /zerovibe:install
+   ```
+   Claude попросит вставить ключ — он сохранится в `~/.zerovibe/config.json`.
+5. **Заведи проект** в папке приложения:
+   ```
+   /zerovibe:new моё-приложение
+   ```
+   Создаёт проект на платформе и пишет его id в `.env` папки.
+6. **Пиши и деплой.** Проси Claude «добавь раздел задач» (skills new-feature +
+   conventions + testing-rules), затем:
+   ```
+   /zerovibe:deploy
+   ```
+   Платформа соберёт образ из твоего кода и поднимет приложение по HTTPS.
 
-- **Go** (stdlib `net/http`, method-pattern роутинг 1.22+).
-- **HTMX** — сервер рендерит HTML-фрагменты, клиент их подменяет. Без SPA, без JS-сборки.
-- **SQLite** через `modernc.org/sqlite` (чистый Go, без CGO → статический бинарь).
-- **html/template** (stdlib), шаблоны встроены через `embed`.
+## Команды (skills под namespace `zerovibe:`)
 
-## Архитектура (чистая, зависимости внутрь)
+| Команда | Что делает |
+|---|---|
+| `/zerovibe:install` | сохранить API-ключ глобально (`~/.zerovibe/config.json`), один раз |
+| `/zerovibe:new <имя>` | создать проект на платформе, привязать папку (`.env` → ZEROVIBE_PROJECT) |
+| `/zerovibe:deploy` | собрать архив, залить, задеплоить → `<sub>.zerovibe.ru` |
+| `/zerovibe:new-feature` | добавить сущность срезом через все слои (по образцу `Note`) |
+| `/zerovibe:conventions` | архитектура и паттерны стека (model-invoked) |
+| `/zerovibe:testing-rules` | что и как покрывать тестами (model-invoked) |
+
+## Модель доступа
+
+- **Ключ — глобальный**, на все проекты вайбкодера. Хранится в
+  `~/.zerovibe/config.json` (права 0600, как `~/.aws/credentials`). Не коммить.
+- **Проект — на папку.** `/zerovibe:new` пишет `ZEROVIBE_PROJECT` и `ZEROVIBE_API`
+  в `.env` папки (не секреты). Ключ в `.env` НЕ попадает.
+- Все вызовы к платформе — заголовком `X-API-Key`. Тот же ключ работает и в кабинете.
+
+## Структура
 
 ```
-internal/
-  domain/              сущности + инварианты + ошибки (только stdlib)
-  usecase/             бизнес-логика + порты (интерфейсы репозиториев); зависит от domain
-  repository/sqlite/   реализация портов поверх SQLite
-  platform/db/         SQLite + ОЧЕРЕДЬ ЗАПИСИ (единый писатель)
-  transport/web/       HTTP/HTML на HTMX; зависит от usecase
-cmd/server/            composition root: склейка слоёв + HTTP-сервер
+zerovibe/                       ← корень репо = плагин
+  .claude-plugin/
+    plugin.json                 манифест плагина
+    marketplace.json            для установки через /plugin marketplace add
+  skills/
+    install/SKILL.md            подключение ключа (глобально)
+    new/SKILL.md                развернуть шаблон + создать проект + привязка папки
+    deploy/SKILL.md             сборка + деплой
+    conventions/SKILL.md        архитектура стека
+    new-feature/SKILL.md        рецепт фичи через слои
+    testing-rules/SKILL.md      правила тестов
+  template/                     код-шаблон Go+HTMX+SQLite (его копирует /zerovibe:new)
 ```
 
-Структуры конвертируются на стыках слоёв; `domain` не знает ни о БД, ни о HTTP.
+## Распространение
 
-## Ключевые паттерны (по ним генерируются фичи)
-
-- **Очередь записи** (`platform/db`): все INSERT/UPDATE/DELETE идут через
-  `db.Write` → единая writer-горутина → нет `SQLITE_BUSY`. Чтения — `db.Read`,
-  параллельно. Вызывающий код не думает о блокировках.
-- **Срез фичи**: на сущность — `domain` (конструктор-валидатор) → `usecase`
-  (порт + сервис) → `repository/sqlite` (реализация порта) → `transport/web`
-  (хендлеры + шаблоны).
-- **HTMX**: `GET /` отдаёт полную страницу; мутации (`POST`/`DELETE`) возвращают
-  ровно тот HTML-фрагмент, который меняется, — htmx подменяет его на клиенте.
-- **Ошибки**: доменные ошибки (`ErrValidation`, `ErrNotFound`) мапятся в HTTP в
-  одной точке (`transport/web/web.go:fail`).
-- **Покрытие**: каждый usecase — unit-тест на фейк-репозитории; транспорт — e2e
-  через `httptest` на временной SQLite (см. `*_test.go`).
-
-## Запуск
-
-```sh
-make run            # локально, БД ./zerovibe.db, http://localhost:8080
-make test           # все тесты
-make docker-run     # в контейнере с volume под данные
-```
-
-Переменные окружения: `ADDR` (по умолч. `:8080`), `DB_PATH` (по умолч.
-`file:zerovibe.db`; в контейнере — `file:/data/zerovibe.db`).
+Через marketplace Claude Code (корневой `.claude-plugin/marketplace.json`,
+source `./`) или `--plugin-dir .`. Версия — поле `version` в `plugin.json`.

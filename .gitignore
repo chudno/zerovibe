@@ -1,21 +1,13 @@
-# бинари
-/bin/
-zerovibe
-
-# локальная БД SQLite
-*.db
-*.db-wal
-*.db-shm
+# Репозиторий плагина zerovibe. template/ коммитим целиком (раздаваемый шаблон) —
+# у него собственный .gitignore для приложений вайбкодеров.
 
 # среда/редакторы
 .env
 .DS_Store
 .idea/
 
-# terraform (стейт и кэш не коммитим; .terraform.lock.hcl — коммитим)
-**/.terraform/*
-*.tfstate
-*.tfstate.*
-*.tfvars
-!*.tfvars.example
-crash.log
+# артефакты, если шаблон собирали на месте (не коммитим)
+template/bin/
+template/*.db
+template/*.db-wal
+template/*.db-shm

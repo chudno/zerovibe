@@ -1,0 +1,10 @@
+.git
+.github
+bin
+*.db
+*.db-wal
+*.db-shm
+.env
+.DS_Store
+.idea
+README.md

@@ -1,0 +1,14 @@
+{
+  "name": "zerovibe",
+  "owner": {
+    "name": "zerovibe",
+    "url": "https://zerovibe.ru"
+  },
+  "plugins": [
+    {
+      "name": "zerovibe",
+      "source": "./plugin",
+      "description": "Стартер Go + HTMX + SQLite + деплой на хостинг zerovibe одной командой (install → new → deploy)."
+    }
+  ]
+}

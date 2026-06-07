@@ -1,9 +1,0 @@
-{
-  "name": "zerovibe",
-  "description": "Стартер Go + HTMX + SQLite: чистая архитектура, генерация фич по эталону, правила тестов и деплой на хостинг zerovibe одной командой.",
-  "version": "0.1.0",
-  "author": {
-    "name": "zerovibe"
-  },
-  "homepage": "https://zerovibe.ru"
-}
