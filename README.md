@@ -29,23 +29,25 @@ Zerovibe.
    /zerovibe:init моё-приложение
    ```
    Создаёт проект на платформе и пишет его id в `.env` папки.
-6. **Пиши и деплой.** Проси Claude «добавь раздел задач» (skills new-feature +
-   conventions + testing-rules), затем:
+6. **Пиши приложение словами.** Просто скажи Claude, что нужно — «добавь раздел
+   задач», «сделай форму входа», «выведи список клиентов». Claude сам пишет код по
+   правильной архитектуре и с тестами. Команды для этого учить НЕ нужно.
+7. **Публикуй:**
    ```
    /zerovibe:deploy
    ```
    Платформа соберёт образ из твоего кода и поднимет приложение по HTTPS.
 
-## Команды (skills под namespace `zerovibe:`)
+## Команды (всего три)
 
-| Команда | Что делает |
+| Команда | Когда |
 |---|---|
-| `/zerovibe:install` | сохранить API-ключ глобально (`~/.zerovibe/config.json`), один раз |
-| `/zerovibe:init <имя>` | создать проект на платформе, привязать папку (`.env` → ZEROVIBE_PROJECT) |
-| `/zerovibe:deploy` | собрать архив, залить, задеплоить → `<sub>.zerovibe.ru` |
-| `/zerovibe:new-feature` | добавить сущность срезом через все слои (по образцу `Note`) |
-| `/zerovibe:conventions` | архитектура и паттерны стека (model-invoked) |
-| `/zerovibe:testing-rules` | что и как покрывать тестами (model-invoked) |
+| `/zerovibe:install` | один раз на машину — вставить ключ |
+| `/zerovibe:init <имя>` | один раз на проект — создать приложение в папке |
+| `/zerovibe:deploy` | каждый раз, когда хочешь опубликовать изменения |
+
+Всё остальное — просто разговор с Claude обычными словами. Под капотом плагин
+помогает Claude держать чистую архитектуру и тесты, но тебе об этом думать не надо.
 
 ## Модель доступа
 
@@ -63,13 +65,13 @@ zerovibe/                       ← корень репо = плагин
     plugin.json                 манифест плагина
     marketplace.json            для установки через /plugin marketplace add
   skills/
-    install/SKILL.md            подключение ключа (глобально)
-    new/SKILL.md                развернуть шаблон + создать проект + привязка папки
-    deploy/SKILL.md             сборка + деплой
-    conventions/SKILL.md        архитектура стека
-    new-feature/SKILL.md        рецепт фичи через слои
-    testing-rules/SKILL.md      правила тестов
-  template/                     код-шаблон Go+HTMX+SQLite (его копирует /zerovibe:init)
+    install/SKILL.md            команда: подключить ключ (глобально)
+    init/SKILL.md               команда: развернуть шаблон + создать проект + .env
+    deploy/SKILL.md             команда: сборка + деплой
+    conventions/SKILL.md        (молча) архитектура — Claude применяет сам
+    new-feature/SKILL.md        (молча) рецепт фичи — Claude применяет сам
+    testing-rules/SKILL.md      (молча) правила тестов — Claude применяет сам
+  template/                     код-шаблон приложения (его копирует /zerovibe:init)
 ```
 
 ## Распространение
