@@ -24,6 +24,14 @@ import (
 //go:embed templates/*.html
 var templatesFS embed.FS
 
+// staticFS — клиентские ассеты (htmx и т.п.), вшитые в бинарь. Раздаются по
+// /static/, чтобы не зависеть от внешнего CDN в рантайме (важно для работы в РФ
+// и доступности: unpkg может быть недоступен). Добавляешь файл сюда —
+// автоматически доступен по /static/<имя>.
+//
+//go:embed static/*
+var staticFS embed.FS
+
 // pageData — данные для рендера полной страницы.
 type pageData struct {
 	Title string
@@ -53,6 +61,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /notes", s.handleCreate)
 	mux.HandleFunc("DELETE /notes/{id}", s.handleDelete)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	// Статика (htmx и пр.) из вшитого staticFS: пути вида /static/htmx.min.js.
+	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	return mux
 }
 

@@ -1,11 +1,16 @@
 {{define "content"}}
-	<form hx-post="/notes" hx-target="#notes" hx-swap="afterbegin" hx-on::after-request="this.reset()">
-		<input name="title" placeholder="Заголовок" maxlength="200" required autofocus>
-		<textarea name="body" placeholder="Текст заметки (необязательно)" maxlength="10000"></textarea>
-		<button type="submit">Добавить</button>
-	</form>
+	<!-- Форма создания. HTMX: POST возвращает фрагмент "note", вставляем в начало
+	     #notes (afterbegin), форму сбрасываем после ответа. -->
+	<div class="uk-card uk-card-body uk-margin">
+		<form hx-post="/notes" hx-target="#notes" hx-swap="afterbegin" hx-on::after-request="this.reset()"
+		      class="uk-fieldset space-y-3">
+			<input class="uk-input" name="title" placeholder="Заголовок" maxlength="200" required autofocus>
+			<textarea class="uk-textarea" name="body" placeholder="Текст заметки (необязательно)" maxlength="10000" rows="3"></textarea>
+			<button class="uk-btn uk-btn-primary" type="submit">Добавить</button>
+		</form>
+	</div>
 
-	<div id="notes">
-		{{range .Notes}}{{template "note" .}}{{else}}<p class="empty" id="empty">Пока нет заметок. Добавьте первую.</p>{{end}}
+	<div id="notes" class="space-y-3">
+		{{range .Notes}}{{template "note" .}}{{else}}<p class="uk-text-muted" id="empty">Пока нет заметок. Добавьте первую.</p>{{end}}
 	</div>
 {{end}}

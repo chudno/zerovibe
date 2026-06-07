@@ -4,48 +4,43 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>{{.Title}} · zerovibe</title>
-	<script src="https://unpkg.com/htmx.org@2.0.3"></script>
-	<style>
-		:root { color-scheme: dark; }
-		* { box-sizing: border-box; }
-		body {
-			margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-			background: #0a0a0a; color: #fafafa; line-height: 1.5;
-		}
-		.wrap { max-width: 720px; margin: 0 auto; padding: 48px 24px; }
-		h1 { font-size: 28px; letter-spacing: -0.5px; margin: 0 0 4px; }
-		.muted { color: #a3a3a3; font-size: 14px; margin: 0 0 32px; }
-		form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 32px; }
-		input, textarea {
-			width: 100%; padding: 10px 12px; border-radius: 8px;
-			border: 1px solid #2a2a2a; background: #171717; color: #fafafa; font: inherit;
-		}
-		input:focus, textarea:focus { outline: none; border-color: #8b5cf6; }
-		textarea { min-height: 72px; resize: vertical; }
-		button {
-			align-self: flex-start; padding: 10px 18px; border: none; border-radius: 8px;
-			background: #8b5cf6; color: #fff; font: inherit; font-weight: 600; cursor: pointer;
-		}
-		button:hover { background: #7c3aed; }
-		.note {
-			border: 1px solid #2a2a2a; background: #171717; border-radius: 10px;
-			padding: 16px; margin-bottom: 12px;
-		}
-		.note h3 { margin: 0 0 6px; font-size: 16px; }
-		.note p { margin: 0; color: #d4d4d4; white-space: pre-wrap; }
-		.note .meta { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
-		.note time { color: #737373; font-size: 12px; font-family: ui-monospace, monospace; }
-		.del {
-			background: none; color: #ef4444; padding: 4px 8px; font-size: 13px; font-weight: 500;
-		}
-		.del:hover { background: #2a1414; }
-		.empty { color: #737373; font-size: 14px; }
-	</style>
+
+	<!-- Franken UI (shadcn-вид на UIkit). Вся статика локальная (/static), без CDN —
+	     важно для работы в РФ и доступности. Файлы вшиты в бинарь через embed.
+	     Документация компонентов для ИИ-агента: skills/ui-kit/ в плагине. -->
+	<link rel="stylesheet" href="/static/frankenui-core.min.css">
+	<link rel="stylesheet" href="/static/frankenui-utilities.min.css">
+
+	<!-- Тема Franken UI. Выставляем ДО рендера body, чтобы не было вспышки светлой
+	     темы. По умолчанию — тёмная (фирменный вид Zerovibe), тема zinc. Запоминаем
+	     выбор пользователя в localStorage под ключом __FRANKEN__. -->
+	<script>
+		(function () {
+			var html = document.documentElement;
+			var saved = JSON.parse(localStorage.getItem("__FRANKEN__") || "{}");
+			// Zerovibe по умолчанию тёмный; уважаем явный выбор пользователя.
+			if (saved.mode === "light") {
+				html.classList.remove("dark");
+			} else {
+				html.classList.add("dark");
+			}
+			html.classList.add(saved.theme || "uk-theme-zinc");
+			html.classList.add(saved.radii || "uk-radii-md");
+			html.classList.add(saved.shadows || "uk-shadows-sm");
+			html.classList.add(saved.font || "uk-font-sm");
+		})();
+	</script>
+
+	<script type="module" src="/static/frankenui-core.iife.js"></script>
+	<script type="module" src="/static/frankenui-icon.iife.js"></script>
+	<script src="/static/htmx.min.js"></script>
 </head>
-<body>
-	<div class="wrap">
-		<h1>Заметки</h1>
-		<p class="muted">Эталонное приложение zerovibe · Go + HTMX + SQLite</p>
+<body class="bg-background text-foreground">
+	<div class="uk-container uk-container-small" style="padding-block: 48px;">
+		<div class="uk-margin">
+			<h1 class="uk-h2">Заметки</h1>
+			<p class="uk-text-muted">Эталонное приложение Zerovibe</p>
+		</div>
 		{{template "content" .}}
 	</div>
 </body>

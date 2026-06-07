@@ -51,12 +51,35 @@ func TestCreateReturnsFragment(t *testing.T) {
 		t.Fatalf("ожидался 200, получен %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	// Ответ — ФРАГМЕНТ одной заметки (не полная страница): без <html>, с классом note.
+	// Ответ — ФРАГМЕНТ одной заметки (не полная страница): без <html>, с id="note-<ID>",
+	// который htmx адресует для замены/удаления.
 	if strings.Contains(body, "<html") {
 		t.Error("ответ POST должен быть фрагментом, а не полной страницей")
 	}
-	if !strings.Contains(body, "Купить хлеб") || !strings.Contains(body, `class="note"`) {
+	if !strings.Contains(body, "Купить хлеб") || !strings.Contains(body, `id="note-`) {
 		t.Errorf("фрагмент заметки не содержит ожидаемого, получено: %s", body)
+	}
+}
+
+// TestStaticServed — клиентская статика (htmx, Franken UI) раздаётся локально из
+// вшитого staticFS по /static/<имя>, без обращения к внешнему CDN.
+func TestStaticServed(t *testing.T) {
+	h := newTestServer(t)
+	for _, name := range []string{
+		"htmx.min.js",
+		"frankenui-core.min.css",
+		"frankenui-utilities.min.css",
+		"frankenui-core.iife.js",
+		"frankenui-icon.iife.js",
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "/static/"+name, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET /static/%s: ожидался 200, получен %d", name, rec.Code)
+		}
+		if rec.Body.Len() == 0 {
+			t.Errorf("GET /static/%s: пустое тело", name)
+		}
 	}
 }
 

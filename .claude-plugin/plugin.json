@@ -1,7 +1,7 @@
 {
   "name": "zerovibe",
-  "description": "Создавай приложения с ИИ и публикуй их одной командой на платформе zerovibe: шаблон проекта, генерация фич, тесты и деплой (install → new → deploy).",
-  "version": "0.2.0",
+  "description": "Создавай приложения с ИИ и публикуй их одной командой на платформе zerovibe: шаблон проекта с готовым UI (Franken UI), генерация фич, тесты и деплой (install → new → deploy).",
+  "version": "0.3.0",
   "author": {
     "name": "zerovibe"
   },
