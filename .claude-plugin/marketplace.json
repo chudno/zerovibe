@@ -8,7 +8,7 @@
     {
       "name": "zerovibe",
       "source": "./plugin",
-      "description": "Стартер Go + HTMX + SQLite + деплой на хостинг zerovibe одной командой (install → new → deploy)."
+      "description": "Создавай приложения с ИИ и публикуй на хостинге zerovibe одной командой (install → new → deploy)."
     }
   ]
 }

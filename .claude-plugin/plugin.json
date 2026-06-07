@@ -1,6 +1,6 @@
 {
   "name": "zerovibe",
-  "description": "Стартер Go + HTMX + SQLite: шаблон проекта, генерация фич по эталону, правила тестов и деплой на хостинг zerovibe одной командой (install → new → deploy).",
+  "description": "Создавай приложения с ИИ и публикуй их одной командой на хостинге zerovibe: шаблон проекта, генерация фич, тесты и деплой (install → new → deploy).",
   "version": "0.2.0",
   "author": {
     "name": "zerovibe"
