@@ -9,15 +9,36 @@ Zerovibe.
    пришлём данные для входа.
 2. **Создай ключ.** Войди в кабинет → раздел «Ключи» (`/app/keys`) → «Создать ключ»,
    скопируй секрет (показывается один раз).
-3. **Поставь плагин** в Claude Code — двумя способами:
-   - **Через меню (desktop):** кнопка **+** у поля ввода → **Plugins** → **Add plugin**
-     → добавь маркетплейс `chudno/zerovibe` → установи плагин **zerovibe** →
-     `/reload-plugins`.
-   - **Слэш-командами** (desktop и терминал одинаково):
-     ```
-     /plugin marketplace add chudno/zerovibe
-     /plugin install zerovibe@zerovibe
-     ```
+3. **Поставь плагин** в Claude Code.
+
+   **Способ A — через настройки (работает в desktop И в терминале, рекомендуется).**
+   Открой файл `~/.claude/settings.json` и добавь два блока (если файла нет — создай
+   его с таким содержимым; если блоки уже есть — допиши в них строки про `zerovibe`):
+   ```json
+   {
+     "enabledPlugins": {
+       "zerovibe@zerovibe": true
+     },
+     "extraKnownMarketplaces": {
+       "zerovibe": {
+         "source": { "source": "github", "repo": "chudno/zerovibe" },
+         "autoUpdate": true
+       }
+     }
+   }
+   ```
+   Затем **перезапусти приложение Claude** — плагин установится сам и будет
+   обновляться автоматически (`autoUpdate`).
+
+   **Способ B — слэш-командами (только терминал/CLI).**
+   ```
+   /plugin marketplace add chudno/zerovibe
+   /plugin install zerovibe@zerovibe
+   /reload-plugins
+   ```
+   В desktop-приложении эти команды и добавление своего маркетплейса через меню
+   пока не поддерживаются — используй способ A.
+
    (локально для разработки: `claude --plugin-dir .` из корня репо плагина)
 4. **Подключи ключ** (один раз на машину):
    ```

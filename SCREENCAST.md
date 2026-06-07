@@ -14,16 +14,31 @@
 Если ключ уже сохранён — пропусти.
 
 ### A2. Установи/обнови плагин в Claude Code
-Через меню (desktop): кнопка **+** у поля ввода → **Plugins** → **Add plugin** →
-добавь маркетплейс `chudno/zerovibe` → установи плагин **zerovibe** → `/reload-plugins`.
 
-Командами (одинаково в desktop и терминале):
+Desktop-приложение НЕ поддерживает слэш-команды `/plugin` и добавление своего
+маркетплейса через меню — используй настройки.
+
+**Способ A (desktop и CLI):** добавь в `~/.claude/settings.json`:
+```json
+{
+  "enabledPlugins": { "zerovibe@zerovibe": true },
+  "extraKnownMarketplaces": {
+    "zerovibe": {
+      "source": { "source": "github", "repo": "chudno/zerovibe" },
+      "autoUpdate": true
+    }
+  }
+}
+```
+Затем **перезапусти приложение Claude**. `autoUpdate: true` сам подтянет свежую
+версию (0.3.0+ с Franken UI и графиком) — отдельно обновлять не нужно.
+
+**Способ B (только CLI):**
 ```
 /plugin marketplace add chudno/zerovibe
 /plugin install zerovibe@zerovibe
+/reload-plugins
 ```
-ВАЖНО: если плагин уже стоял — обнови его (переустанови), чтобы подтянулась
-версия 0.3.0+ с Franken UI и графиком.
 
 ### A3. Подключи ключ (один раз на машину)
 ```
