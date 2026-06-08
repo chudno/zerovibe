@@ -5,44 +5,21 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>{{.Title}} · zerovibe</title>
 
-	<!-- Franken UI (shadcn-вид на UIkit). Вся статика локальная (/static), без CDN —
-	     важно для работы в РФ и доступности. Файлы вшиты в бинарь через embed.
-	     Документация компонентов для ИИ-агента: skills/ui-kit/ в плагине. -->
-	<link rel="stylesheet" href="/static/frankenui-core.min.css">
-	<link rel="stylesheet" href="/static/frankenui-utilities.min.css">
+	<!-- Стили приложения. Базовый app.css — здесь; дизайн переносится из макета
+	     Pencil (см. skill design): токены в :root, классы под нужный экран. -->
+	<link rel="stylesheet" href="/static/app.css">
 
-	<!-- Тема Franken UI. Выставляем ДО рендера body, чтобы не было вспышки. Светлая
-	     или тёмная — по системной настройке пользователя (prefers-color-scheme),
-	     с уважением явного выбора из localStorage (__FRANKEN__). Не навязываем. -->
-	<script>
-		(function () {
-			var html = document.documentElement;
-			var saved = JSON.parse(localStorage.getItem("__FRANKEN__") || "{}");
-			var dark = saved.mode === "dark" ||
-				(!saved.mode && window.matchMedia("(prefers-color-scheme: dark)").matches);
-			html.classList.toggle("dark", dark);
-			html.classList.add(saved.theme || "uk-theme-zinc");
-			html.classList.add(saved.radii || "uk-radii-md");
-			html.classList.add(saved.shadows || "uk-shadows-sm");
-			html.classList.add(saved.font || "uk-font-sm");
-		})();
-	</script>
-
-	<script type="module" src="/static/frankenui-core.iife.js"></script>
-	<script type="module" src="/static/frankenui-icon.iife.js"></script>
+	<!-- htmx для интерактива (локально, без CDN — важно для работы в РФ). -->
 	<script src="/static/htmx.min.js"></script>
-	<!-- Графики (<uk-chart>) НЕ подключены: скрипт большой (~0.5 МБ), нужен редко.
-	     Понадобился график — добавь <script type="module" src="/static/frankenui-chart.iife.js">
-	     и положи файл в static/ (см. skill ui-kit). -->
-
+	<!-- Слот для дополнительных скриптов экрана, если понадобятся. -->
 </head>
-<body class="bg-background text-foreground">
-	<div class="uk-container uk-container-small" style="padding-block: 48px;">
-		<div class="uk-margin">
-			<h1 class="uk-h2">Заметки</h1>
-			<p class="uk-text-muted">Эталонное приложение Zerovibe</p>
-		</div>
+<body>
+	<main class="container">
+		<header class="page-head">
+			<h1>Заметки</h1>
+			<p class="muted">Эталонное приложение Zerovibe</p>
+		</header>
 		{{template "content" .}}
-	</div>
+	</main>
 </body>
 </html>{{end}}

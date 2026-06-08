@@ -61,16 +61,13 @@ func TestCreateReturnsFragment(t *testing.T) {
 	}
 }
 
-// TestStaticServed — клиентская статика (htmx, Franken UI) раздаётся локально из
+// TestStaticServed — клиентская статика (htmx, app.css) раздаётся локально из
 // вшитого staticFS по /static/<имя>, без обращения к внешнему CDN.
 func TestStaticServed(t *testing.T) {
 	h := newTestServer(t)
 	for _, name := range []string{
 		"htmx.min.js",
-		"frankenui-core.min.css",
-		"frankenui-utilities.min.css",
-		"frankenui-core.iife.js",
-		"frankenui-icon.iife.js",
+		"app.css",
 	} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", "/static/"+name, nil))

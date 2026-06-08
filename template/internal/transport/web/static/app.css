@@ -1,0 +1,99 @@
+/* app.css — базовые стили приложения Zerovibe.
+ *
+ * Это СТАРТОВАЯ точка, а не финал. Реальный дизайн каждого экрана переносится из
+ * макета Pencil: токены (цвета/шрифты/отступы) и значения берутся через MCP и
+ * кладутся сюда (см. skill `design`). Здесь — минимальный каркас, чтобы эталонное
+ * demo-приложение «Заметки» выглядело прилично до подключения макета.
+ *
+ * Чистый CSS, без Tailwind/UIkit. Переменные в :root — замещай их значениями из
+ * Pencil (get_variables), классы — расширяй/переопределяй по snapshot_layout.
+ */
+
+:root {
+	/* Палитра (тёмная, фирменный фиолетовый акцент). Замещается токенами Pencil. */
+	--bg:            #0a0a0a;
+	--surface:       #111114;
+	--surface-2:     #17171b;
+	--border:        #27272a;
+	--text:          #fafafa;
+	--text-muted:    #a1a1aa;
+	--text-dim:      #71717a;
+	--accent:        #a855f7;
+	--accent-hover:  #9333ea;
+	--danger:        #ef4444;
+
+	--radius:        10px;
+	--gap:           12px;
+	--font-sans:     ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+	--font-mono:     ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	font-family: var(--font-sans);
+	background: var(--bg);
+	color: var(--text);
+	line-height: 1.5;
+}
+
+.container {
+	max-width: 640px;
+	margin: 0 auto;
+	padding: 48px 24px;
+}
+
+.page-head { margin-bottom: 32px; }
+.page-head h1 { font-size: 28px; letter-spacing: -0.4px; margin: 0 0 4px; }
+.muted { color: var(--text-muted); margin: 0; }
+
+/* Карточка — контейнер блока. */
+.card {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 20px;
+}
+
+/* Поля ввода. */
+.input, .textarea {
+	width: 100%;
+	padding: 10px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--border);
+	background: var(--surface-2);
+	color: var(--text);
+	font: inherit;
+}
+.input:focus, .textarea:focus { outline: none; border-color: var(--accent); }
+.textarea { min-height: 72px; resize: vertical; }
+
+/* Группа полей формы с вертикальным ритмом. */
+.field { display: flex; flex-direction: column; gap: var(--gap); }
+
+/* Кнопки. */
+.btn {
+	display: inline-flex; align-items: center; gap: 6px;
+	padding: 10px 18px; border: none; border-radius: 8px;
+	background: var(--accent); color: #fff; font: inherit; font-weight: 600;
+	cursor: pointer;
+}
+.btn:hover { background: var(--accent-hover); }
+.btn-ghost {
+	background: none; color: var(--text-muted); padding: 6px 10px; font-weight: 500;
+}
+.btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+.btn-danger { color: var(--danger); }
+
+/* Вертикальный отступ между блоками. */
+.stack > * + * { margin-top: var(--gap); }
+
+/* Один элемент заметки. */
+.note { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.note-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.note-head h3 { margin: 0; font-size: 16px; }
+.note-body { margin: 8px 0 0; color: var(--text-muted); white-space: pre-wrap; }
+.note-time { display: block; margin-top: 12px; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
+
+.empty { color: var(--text-dim); }

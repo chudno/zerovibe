@@ -11,10 +11,10 @@ Reference-приложение: веб-приложение на **Go + HTMX + S
 
 - **Go** (stdlib `net/http`, method-pattern роутинг 1.22+).
 - **HTMX** — сервер рендерит HTML-фрагменты, клиент их подменяет. Без SPA, без JS-сборки.
-- **Franken UI** — компоненты в стиле shadcn (на UIkit) для оформления. Светлая/тёмная
-  тема — по системной настройке пользователя. Вся статика (CSS/JS, htmx) локальная в
-  `internal/transport/web/static/`, вшита в бинарь через `embed` и раздаётся с
-  `/static/` — без CDN в рантайме. Графики (`<uk-chart>`) не подключены по умолчанию.
+- **Чистый CSS** (`static/app.css`) — без UI-библиотек. Дизайн экранов переносится
+  из макета Pencil (точные токены/отступы через MCP, см. skill `design`). Вся
+  статика (`app.css`, htmx) локальная в `internal/transport/web/static/`, вшита в
+  бинарь через `embed` и раздаётся с `/static/` — без CDN в рантайме.
 - **SQLite** через `modernc.org/sqlite` (чистый Go, без CGO → статический бинарь).
 - **html/template** (stdlib), шаблоны встроены через `embed`.
 
