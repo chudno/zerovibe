@@ -14,10 +14,11 @@ import (
 )
 
 // NoteRepository — порт хранилища заметок. Реализуется в repository/sqlite.
+// Заметки личные: операции привязаны к владельцу (ownerID).
 type NoteRepository interface {
-	Create(ctx context.Context, n domain.Note) (domain.Note, error)
-	List(ctx context.Context) ([]domain.Note, error)
-	Delete(ctx context.Context, id int64) error
+	Create(ctx context.Context, n domain.Note) (domain.Note, error) // n.OwnerID уже задан
+	ListByOwner(ctx context.Context, ownerID int64) ([]domain.Note, error)
+	Delete(ctx context.Context, id, ownerID int64) error // удаляет только свою; иначе ErrNotFound
 }
 
 // NoteService — бизнес-операции над заметками.
@@ -30,21 +31,22 @@ func NewNoteService(repo NoteRepository) *NoteService {
 	return &NoteService{repo: repo}
 }
 
-// Create валидирует ввод через доменный конструктор и сохраняет заметку.
-func (s *NoteService) Create(ctx context.Context, title, body string) (domain.Note, error) {
+// Create валидирует ввод через доменный конструктор и сохраняет заметку владельца.
+func (s *NoteService) Create(ctx context.Context, ownerID int64, title, body string) (domain.Note, error) {
 	n, err := domain.NewNote(title, body)
 	if err != nil {
 		return domain.Note{}, err
 	}
+	n.OwnerID = ownerID
 	return s.repo.Create(ctx, n)
 }
 
-// List возвращает все заметки (новые сверху — порядок задаёт репозиторий).
-func (s *NoteService) List(ctx context.Context) ([]domain.Note, error) {
-	return s.repo.List(ctx)
+// List возвращает заметки владельца (новые сверху — порядок задаёт репозиторий).
+func (s *NoteService) List(ctx context.Context, ownerID int64) ([]domain.Note, error) {
+	return s.repo.ListByOwner(ctx, ownerID)
 }
 
-// Delete удаляет заметку по id.
-func (s *NoteService) Delete(ctx context.Context, id int64) error {
-	return s.repo.Delete(ctx, id)
+// Delete удаляет заметку владельца по id (чужую не трогает — ErrNotFound).
+func (s *NoteService) Delete(ctx context.Context, id, ownerID int64) error {
+	return s.repo.Delete(ctx, id, ownerID)
 }

@@ -1,7 +1,5 @@
-// Unit-тест бизнес-логики на фейковом репозитории (без БД и сети).
-// ОБРАЗЕЦ ПОКРЫТИЯ: каждый usecase покрывается так — фейк-реализация порта +
-// проверка оркестрации и валидации. Быстро, детерминированно, без внешних
-// зависимостей. Это обязательный уровень покрытия для каждой сущности.
+// Unit-тест бизнес-логики заметок на фейковом репозитории (без БД и сети).
+// Заметки личные: проверяем валидацию, владельца и изоляцию между пользователями.
 package usecase
 
 import (
@@ -12,7 +10,7 @@ import (
 	"github.com/chudno/zerovibe/internal/domain"
 )
 
-// fakeNoteRepo — in-memory реализация порта NoteRepository для тестов.
+// fakeNoteRepo — in-memory реализация порта NoteRepository (owner-scoped).
 type fakeNoteRepo struct {
 	items  []domain.Note
 	nextID int64
@@ -25,13 +23,19 @@ func (f *fakeNoteRepo) Create(_ context.Context, n domain.Note) (domain.Note, er
 	return n, nil
 }
 
-func (f *fakeNoteRepo) List(_ context.Context) ([]domain.Note, error) {
-	return f.items, nil
+func (f *fakeNoteRepo) ListByOwner(_ context.Context, ownerID int64) ([]domain.Note, error) {
+	var out []domain.Note
+	for _, n := range f.items {
+		if n.OwnerID == ownerID {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }
 
-func (f *fakeNoteRepo) Delete(_ context.Context, id int64) error {
+func (f *fakeNoteRepo) Delete(_ context.Context, id, ownerID int64) error {
 	for i, n := range f.items {
-		if n.ID == id {
+		if n.ID == id && n.OwnerID == ownerID {
 			f.items = append(f.items[:i], f.items[i+1:]...)
 			return nil
 		}
@@ -41,12 +45,15 @@ func (f *fakeNoteRepo) Delete(_ context.Context, id int64) error {
 
 func TestNoteService_Create_OK(t *testing.T) {
 	svc := NewNoteService(&fakeNoteRepo{})
-	n, err := svc.Create(context.Background(), "  Привет  ", "тело")
+	n, err := svc.Create(context.Background(), 7, "  Привет  ", "тело")
 	if err != nil {
 		t.Fatalf("неожиданная ошибка: %v", err)
 	}
 	if n.ID == 0 {
 		t.Error("ожидался присвоенный id")
+	}
+	if n.OwnerID != 7 {
+		t.Errorf("ожидался владелец 7, получено %d", n.OwnerID)
 	}
 	if n.Title != "Привет" {
 		t.Errorf("заголовок должен быть усечён по пробелам, получено %q", n.Title)
@@ -55,7 +62,7 @@ func TestNoteService_Create_OK(t *testing.T) {
 
 func TestNoteService_Create_EmptyTitle(t *testing.T) {
 	svc := NewNoteService(&fakeNoteRepo{})
-	_, err := svc.Create(context.Background(), "   ", "тело")
+	_, err := svc.Create(context.Background(), 1, "   ", "тело")
 	var ve domain.ErrValidation
 	if !errors.As(err, &ve) {
 		t.Fatalf("ожидалась ErrValidation, получено %v", err)
@@ -65,27 +72,40 @@ func TestNoteService_Create_EmptyTitle(t *testing.T) {
 	}
 }
 
-func TestNoteService_List_NewestFirst(t *testing.T) {
+func TestNoteService_List_OnlyOwner(t *testing.T) {
 	svc := NewNoteService(&fakeNoteRepo{})
 	ctx := context.Background()
-	_, _ = svc.Create(ctx, "первая", "")
-	_, _ = svc.Create(ctx, "вторая", "")
+	_, _ = svc.Create(ctx, 1, "моя", "")
+	_, _ = svc.Create(ctx, 2, "чужая", "")
 
-	got, err := svc.List(ctx)
+	got, err := svc.List(ctx, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("ожидалось 2 заметки, получено %d", len(got))
+	if len(got) != 1 {
+		t.Fatalf("ожидалась 1 заметка владельца 1, получено %d", len(got))
 	}
-	if got[0].Title != "вторая" {
-		t.Errorf("новые должны быть сверху, первый элемент %q", got[0].Title)
+	if got[0].Title != "моя" {
+		t.Errorf("должна вернуться только своя заметка, получено %q", got[0].Title)
+	}
+}
+
+func TestNoteService_Delete_OtherOwner_NotFound(t *testing.T) {
+	svc := NewNoteService(&fakeNoteRepo{})
+	ctx := context.Background()
+	n, _ := svc.Create(ctx, 2, "чужая", "")
+
+	// пользователь 1 пытается удалить заметку пользователя 2
+	err := svc.Delete(ctx, n.ID, 1)
+	var nf domain.ErrNotFound
+	if !errors.As(err, &nf) {
+		t.Fatalf("ожидалась ErrNotFound при удалении чужой заметки, получено %v", err)
 	}
 }
 
 func TestNoteService_Delete_NotFound(t *testing.T) {
 	svc := NewNoteService(&fakeNoteRepo{})
-	err := svc.Delete(context.Background(), 999)
+	err := svc.Delete(context.Background(), 999, 1)
 	var nf domain.ErrNotFound
 	if !errors.As(err, &nf) {
 		t.Fatalf("ожидалась ErrNotFound, получено %v", err)

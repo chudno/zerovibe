@@ -11,15 +11,29 @@
 
 	<!-- htmx для интерактива (локально, без CDN — важно для работы в РФ). -->
 	<script src="/static/htmx.min.js"></script>
-	<!-- Слот для дополнительных скриптов экрана, если понадобятся. -->
 </head>
 <body>
 	<main class="container">
 		<header class="page-head">
-			<h1>Заметки</h1>
-			<p class="muted">Эталонное приложение Zerovibe</p>
+			<h1>{{.Title}}</h1>
+			{{if .User}}
+			<div class="user-bar">
+				<span class="muted">{{.User.Email}}</span>
+				{{if eq .User.Role "admin"}}<a class="navlink" href="/admin/settings">Настройки</a>{{end}}
+				<form method="post" action="/logout" style="display:inline">
+					<button class="btn-ghost" type="submit">Выйти</button>
+				</form>
+			</div>
+			{{end}}
 		</header>
-		{{template "content" .}}
+
+		{{if eq .Page "login"}}{{template "login" .}}
+		{{else if eq .Page "register"}}{{template "register" .}}
+		{{else if eq .Page "forgot"}}{{template "forgot" .}}
+		{{else if eq .Page "reset"}}{{template "reset" .}}
+		{{else if eq .Page "verify"}}{{template "verify" .}}
+		{{else if eq .Page "settings"}}{{template "settings" .}}
+		{{else}}{{template "content" .}}{{end}}
 	</main>
 </body>
 </html>{{end}}

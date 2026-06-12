@@ -16,7 +16,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
 	_ "modernc.org/sqlite" // чистый Go SQLite-драйвер, без CGO → статический бинарь
 )
@@ -106,17 +105,4 @@ func (d *DB) Read(fn func(*sql.DB) error) error {
 func (d *DB) Close() error {
 	close(d.done)
 	return d.sql.Close()
-}
-
-// Migrate применяет схему (idempotent CREATE TABLE IF NOT EXISTS). Для скелета
-// достаточно встроенной схемы; на реальном проекте заменяется на файлы миграций.
-func (d *DB) Migrate(ctx context.Context, schema string) error {
-	return d.Write(ctx, func(s *sql.DB) error {
-		c, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		if _, err := s.ExecContext(c, schema); err != nil {
-			return fmt.Errorf("миграция: %w", err)
-		}
-		return nil
-	})
 }

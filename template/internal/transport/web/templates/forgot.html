@@ -1,0 +1,20 @@
+{{define "forgot"}}
+<div class="auth-wrap">
+	<div class="card auth-card">
+		{{if .Flash}}
+		<p class="flash">{{.Flash}}</p>
+		<div class="auth-links"><a class="navlink" href="/login">Вернуться ко входу</a></div>
+		{{else}}
+		{{if .Err}}<p class="form-error">{{.Err}}</p>{{end}}
+		<p class="muted">Укажите email — пришлём ссылку для сброса пароля.</p>
+		<form class="field" method="post" action="/forgot">
+			<label class="label">Email
+				<input class="input" type="email" name="email" autocomplete="username" required autofocus>
+			</label>
+			<button class="btn" type="submit">Отправить ссылку</button>
+		</form>
+		<div class="auth-links"><a class="navlink" href="/login">Вспомнили пароль? Войти</a></div>
+		{{end}}
+	</div>
+</div>
+{{end}}

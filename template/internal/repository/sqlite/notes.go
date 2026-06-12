@@ -16,15 +16,6 @@ import (
 	"github.com/chudno/zerovibe/internal/domain"
 )
 
-// Schema — DDL схемы заметок (idempotent). Применяется при старте через db.Migrate.
-const Schema = `
-CREATE TABLE IF NOT EXISTS notes (
-	id         INTEGER PRIMARY KEY AUTOINCREMENT,
-	title      TEXT NOT NULL,
-	body       TEXT NOT NULL DEFAULT '',
-	created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);`
-
 // writer — минимальный интерфейс к платформенному db.DB (Write/Read).
 // Принимаем интерфейсом, а не *db.DB, чтобы репозиторий было легко тестировать.
 type writer interface {
@@ -42,7 +33,7 @@ func NewNoteRepo(db writer) *NoteRepo {
 	return &NoteRepo{db: db}
 }
 
-// Create вставляет заметку (через очередь записи) и возвращает её с id и
+// Create вставляет заметку владельца (через очередь записи) и возвращает её с id и
 // проставленным базой created_at — чтобы фрагмент сразу показывал время.
 func (r *NoteRepo) Create(ctx context.Context, n domain.Note) (domain.Note, error) {
 	err := r.db.Write(ctx, func(s *sql.DB) error {
@@ -50,8 +41,8 @@ func (r *NoteRepo) Create(ctx context.Context, n domain.Note) (domain.Note, erro
 		// RETURNING поддерживается SQLite ≥3.35 (есть в modernc) — отдаёт id и
 		// время одним запросом, без отдельного SELECT.
 		err := s.QueryRowContext(ctx,
-			`INSERT INTO notes (title, body) VALUES (?, ?) RETURNING id, created_at`,
-			n.Title, n.Body,
+			`INSERT INTO notes (owner_id, title, body) VALUES (?, ?, ?) RETURNING id, created_at`,
+			n.OwnerID, n.Title, n.Body,
 		).Scan(&n.ID, &created)
 		if err != nil {
 			return fmt.Errorf("insert note: %w", err)
@@ -65,12 +56,12 @@ func (r *NoteRepo) Create(ctx context.Context, n domain.Note) (domain.Note, erro
 	return n, nil
 }
 
-// List возвращает заметки, новые сверху.
-func (r *NoteRepo) List(ctx context.Context) ([]domain.Note, error) {
+// ListByOwner возвращает заметки владельца, новые сверху.
+func (r *NoteRepo) ListByOwner(ctx context.Context, ownerID int64) ([]domain.Note, error) {
 	var notes []domain.Note
 	err := r.db.Read(func(s *sql.DB) error {
 		rows, err := s.QueryContext(ctx,
-			`SELECT id, title, body, created_at FROM notes ORDER BY id DESC`)
+			`SELECT id, owner_id, title, body, created_at FROM notes WHERE owner_id = ? ORDER BY id DESC`, ownerID)
 		if err != nil {
 			return fmt.Errorf("select notes: %w", err)
 		}
@@ -79,7 +70,7 @@ func (r *NoteRepo) List(ctx context.Context) ([]domain.Note, error) {
 		for rows.Next() {
 			var n domain.Note
 			var created string
-			if err := rows.Scan(&n.ID, &n.Title, &n.Body, &created); err != nil {
+			if err := rows.Scan(&n.ID, &n.OwnerID, &n.Title, &n.Body, &created); err != nil {
 				return fmt.Errorf("scan note: %w", err)
 			}
 			n.CreatedAt = parseTime(created)
@@ -90,10 +81,11 @@ func (r *NoteRepo) List(ctx context.Context) ([]domain.Note, error) {
 	return notes, err
 }
 
-// Delete удаляет заметку по id (через очередь записи).
-func (r *NoteRepo) Delete(ctx context.Context, id int64) error {
+// Delete удаляет заметку владельца по id (чужую не трогает — отдаёт ErrNotFound,
+// скрывая существование чужих заметок).
+func (r *NoteRepo) Delete(ctx context.Context, id, ownerID int64) error {
 	return r.db.Write(ctx, func(s *sql.DB) error {
-		res, err := s.ExecContext(ctx, `DELETE FROM notes WHERE id = ?`, id)
+		res, err := s.ExecContext(ctx, `DELETE FROM notes WHERE id = ? AND owner_id = ?`, id, ownerID)
 		if err != nil {
 			return fmt.Errorf("delete note: %w", err)
 		}
