@@ -1,0 +1,22 @@
+{{define "settings"}}
+	<div class="card">
+		<p class="muted">Настройки приложения. Секреты не отображаются — только признак «задано».</p>
+		<table class="settings-table">
+			<thead><tr><th>Настройка</th><th>Значение</th></tr></thead>
+			<tbody>
+			{{range .Settings}}
+				<tr>
+					<td>{{.Title}} <span class="muted">({{.Key}})</span></td>
+					<td>
+						{{if eq .Kind "secret"}}
+							{{if .Set}}<span class="muted">задано</span>{{else}}<span class="text-dim">—</span>{{end}}
+						{{else}}
+							{{if .Value}}{{.Value}}{{else}}<span class="text-dim">—</span>{{end}}
+						{{end}}
+					</td>
+				</tr>
+			{{end}}
+			</tbody>
+		</table>
+	</div>
+{{end}}

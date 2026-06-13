@@ -1,0 +1,16 @@
+{{define "verify"}}
+<div class="auth-wrap">
+	<div class="card auth-card">
+		{{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+		{{if .Err}}<p class="form-error">{{.Err}}</p>{{end}}
+		<p class="muted">Не пришло письмо? Отправим ещё раз.</p>
+		<form class="field" method="post" action="/resend-verification">
+			<label class="label">Email
+				<input class="input" type="email" name="email" value="{{.Email}}" autocomplete="username" required>
+			</label>
+			<button class="btn" type="submit">Отправить письмо повторно</button>
+		</form>
+		<div class="auth-links"><a class="navlink" href="/login">Вернуться ко входу</a></div>
+	</div>
+</div>
+{{end}}

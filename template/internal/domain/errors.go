@@ -1,6 +1,10 @@
 package domain
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"time"
+)
 
 // Доменные ошибки — sentinel-значения и типы, по которым верхние слои принимают
 // решения (транспорт мапит их в HTTP-коды). Проверять через errors.Is / errors.As.
@@ -29,4 +33,35 @@ func (e ErrValidation) Error() string {
 		return e.Msg
 	}
 	return fmt.Sprintf("%s: %s", e.Field, e.Msg)
+}
+
+// Ошибки аутентификации/авторизации. Sentinel-значения — проверять через errors.Is.
+var (
+	// ErrInvalidCredentials — неверный email или пароль. → HTTP 401.
+	// Единая ошибка и для «нет такого пользователя», и для «пароль не подошёл» —
+	// чтобы по ответу нельзя было определить, существует ли email.
+	ErrInvalidCredentials = errors.New("неверный email или пароль")
+	// ErrSignupClosed — регистрация выключена настройкой. → HTTP 403.
+	ErrSignupClosed = errors.New("регистрация закрыта")
+	// ErrEmailTaken — email уже зарегистрирован. → HTTP 409.
+	ErrEmailTaken = errors.New("этот email уже зарегистрирован")
+	// ErrUnauthenticated — нет валидной сессии. → редирект на вход (или 401 для htmx).
+	ErrUnauthenticated = errors.New("требуется вход")
+	// ErrForbidden — недостаточно прав (роль). → HTTP 403.
+	ErrForbidden = errors.New("недостаточно прав")
+	// ErrInvalidToken — токен сброса не найден/просрочен/использован. → HTTP 400.
+	ErrInvalidToken = errors.New("ссылка недействительна или устарела")
+	// ErrEmailNotVerified — почта не подтверждена, а это требуется настройкой.
+	// → вход блокируется, показываем «подтвердите почту».
+	ErrEmailNotVerified = errors.New("подтвердите адрес почты по ссылке из письма")
+)
+
+// ErrRateLimited — превышен лимит попыток. → HTTP 429. Тип (не sentinel), чтобы нести
+// RetryAfter для заголовка Retry-After.
+type ErrRateLimited struct {
+	RetryAfter time.Duration
+}
+
+func (e ErrRateLimited) Error() string {
+	return "слишком много попыток, попробуйте позже"
 }

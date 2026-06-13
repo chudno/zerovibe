@@ -1,0 +1,20 @@
+{{define "reset"}}
+<div class="auth-wrap">
+	<div class="card auth-card">
+		{{if .Token}}
+		{{if .Err}}<p class="form-error">{{.Err}}</p>{{end}}
+		<p class="muted">Задайте новый пароль.</p>
+		<form class="field" method="post" action="/reset">
+			<input type="hidden" name="token" value="{{.Token}}">
+			<label class="label">Новый пароль <span class="muted">(минимум 8 символов)</span>
+				<input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required autofocus>
+			</label>
+			<button class="btn" type="submit">Сохранить пароль</button>
+		</form>
+		{{else}}
+		<p class="form-error">Ссылка недействительна. Запросите сброс заново.</p>
+		<div class="auth-links"><a class="navlink" href="/forgot">Восстановить пароль</a></div>
+		{{end}}
+	</div>
+</div>
+{{end}}

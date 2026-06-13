@@ -1,7 +1,5 @@
-// E2E-тест транспорта на полном стеке (реальный SQLite во временном файле).
-// ОБРАЗЕЦ ПОКРЫТИЯ: проверяем HTTP+HTML+HTMX поведение целиком —
-// создание возвращает HTML-фрагмент, список отражает данные, удаление убирает.
-// Поднимает настоящие слои (db→repo→usecase→web), но БД временная и изолированная.
+// E2E-тест транспорта заметок на полном стеке (реальный SQLite во временном файле).
+// Заметки теперь личные — все запросы идут под сессией засиженного пользователя.
 package web
 
 import (
@@ -10,16 +8,87 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chudno/zerovibe/internal/platform/db"
 	"github.com/chudno/zerovibe/internal/repository/sqlite"
 	"github.com/chudno/zerovibe/internal/usecase"
 )
 
-// newTestServer собирает полный стек на временной БД (t.TempDir → авто-очистка).
-func newTestServer(t *testing.T) http.Handler {
+// noMailer — заглушка Mailer для тестов транспорта заметок (письма тут не нужны).
+type noMailer struct{}
+
+func (noMailer) Send(_ context.Context, _ usecase.Email) error { return nil }
+
+// capturedToken — токен из последнего письма сброса (для e2e reset-флоу).
+var capturedToken string
+
+// captureMailer достаёт токен сброса из ссылки в тексте письма.
+type captureMailer struct{}
+
+var resetLinkRe = regexp.MustCompile(`/reset\?token=([0-9a-f]+)`)
+var verifyLinkRe = regexp.MustCompile(`/verify-email\?token=([0-9a-f]+)`)
+
+// capturedVerifyToken — токен из последнего письма подтверждения почты.
+var capturedVerifyToken string
+
+func (captureMailer) Send(_ context.Context, m usecase.Email) error {
+	if mm := resetLinkRe.FindStringSubmatch(m.Text); mm != nil {
+		capturedToken = mm[1]
+	}
+	if mm := verifyLinkRe.FindStringSubmatch(m.Text); mm != nil {
+		capturedVerifyToken = mm[1]
+	}
+	return nil
+}
+
+// buildStackWithMailer — как buildStack, но с мейлером-перехватчиком токена сброса.
+func buildStackWithMailer(t *testing.T, allowSignup bool) (http.Handler, *usecase.AuthService, *usecase.SettingsService) {
+	t.Helper()
+	capturedToken = ""
+	capturedVerifyToken = ""
+	dsn := "file:" + filepath.Join(t.TempDir(), "test.db")
+	database, err := db.Open(dsn)
+	if err != nil {
+		t.Fatalf("открыть БД: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+	if err := database.MigrateUp(context.Background()); err != nil {
+		t.Fatalf("миграции: %v", err)
+	}
+	settings := usecase.NewSettingsService(sqlite.NewSettingRepo(database))
+	if allowSignup {
+		_ = settings.Set(context.Background(), "allow_signup", "true")
+	}
+	notes := usecase.NewNoteService(sqlite.NewNoteRepo(database))
+	auth := usecase.NewAuthService(
+		sqlite.NewUserRepo(database), sqlite.NewSessionRepo(database),
+		sqlite.NewResetRepo(database), sqlite.NewEmailVerificationRepo(database), sqlite.NewRateLimitRepo(database),
+		usecase.NewBcryptHasher(), captureMailer{}, settings,
+		usecase.AuthConfig{
+			SessionTTL:      time.Hour,
+			ResetTTL:        time.Hour,
+			VerifyTTL:       24 * time.Hour,
+			AppBaseURL:      "http://localhost",
+			LoginRateLimit:  usecase.RateRule{Limit: 5, Window: 15 * time.Minute},
+			ForgotRateLimit: usecase.RateRule{Limit: 3, Window: time.Hour},
+			ResendShortRate: usecase.RateRule{Limit: 1, Window: time.Minute},
+			ResendHourRate:  usecase.RateRule{Limit: 5, Window: time.Hour},
+		},
+	)
+	srv, err := NewServer(notes, auth, settings, Config{SecureCookie: false, CookieName: "zv_session"})
+	if err != nil {
+		t.Fatalf("сервер: %v", err)
+	}
+	return srv.Routes(), auth, settings
+}
+
+// buildStack собирает полный стек на временной БД. Возвращает handler и сервисы для
+// сидирования. allowSignup управляет открытой регистрацией.
+func buildStack(t *testing.T, allowSignup bool) (http.Handler, *usecase.AuthService, *usecase.SettingsService) {
 	t.Helper()
 	dsn := "file:" + filepath.Join(t.TempDir(), "test.db")
 	database, err := db.Open(dsn)
@@ -27,23 +96,81 @@ func newTestServer(t *testing.T) http.Handler {
 		t.Fatalf("открыть БД: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
-
-	if err := database.Migrate(context.Background(), sqlite.Schema); err != nil {
-		t.Fatalf("миграция: %v", err)
+	if err := database.MigrateUp(context.Background()); err != nil {
+		t.Fatalf("миграции: %v", err)
 	}
-	srv, err := NewServer(usecase.NewNoteService(sqlite.NewNoteRepo(database)))
+
+	settings := usecase.NewSettingsService(sqlite.NewSettingRepo(database))
+	if allowSignup {
+		if err := settings.Set(context.Background(), "allow_signup", "true"); err != nil {
+			t.Fatalf("настройка allow_signup: %v", err)
+		}
+	}
+	notes := usecase.NewNoteService(sqlite.NewNoteRepo(database))
+	auth := usecase.NewAuthService(
+		sqlite.NewUserRepo(database), sqlite.NewSessionRepo(database),
+		sqlite.NewResetRepo(database), sqlite.NewEmailVerificationRepo(database), sqlite.NewRateLimitRepo(database),
+		usecase.NewBcryptHasher(), noMailer{}, settings,
+		usecase.AuthConfig{
+			SessionTTL:      time.Hour,
+			ResetTTL:        time.Hour,
+			VerifyTTL:       24 * time.Hour,
+			AppBaseURL:      "http://localhost",
+			LoginRateLimit:  usecase.RateRule{Limit: 5, Window: 15 * time.Minute},
+			ForgotRateLimit: usecase.RateRule{Limit: 3, Window: time.Hour},
+			ResendShortRate: usecase.RateRule{Limit: 1, Window: time.Minute},
+			ResendHourRate:  usecase.RateRule{Limit: 5, Window: time.Hour},
+		},
+	)
+	srv, err := NewServer(notes, auth, settings, Config{SecureCookie: false, CookieName: "zv_session"})
 	if err != nil {
 		t.Fatalf("сервер: %v", err)
 	}
-	return srv.Routes()
+	return srv.Routes(), auth, settings
+}
+
+// seedAdminAndLogin создаёт админа и возвращает cookie его сессии.
+func seedAdminAndLogin(t *testing.T, h http.Handler, auth *usecase.AuthService, email, pass string) *http.Cookie {
+	t.Helper()
+	if err := auth.EnsureAdmin(context.Background(), email, pass); err != nil {
+		t.Fatalf("сид админа: %v", err)
+	}
+	return loginCookie(t, h, email, pass)
+}
+
+// loginCookie логинится и возвращает cookie сессии.
+func loginCookie(t *testing.T, h http.Handler, email, pass string) *http.Cookie {
+	t.Helper()
+	form := url.Values{"email": {email}, "password": {pass}}
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "zv_session" && c.Value != "" {
+			return c
+		}
+	}
+	t.Fatalf("логин не вернул cookie сессии (код %d): %s", rec.Code, rec.Body.String())
+	return nil
+}
+
+var noteIDRe = regexp.MustCompile(`id="note-(\d+)"`)
+
+// newAuthedServer — стек + cookie залогиненного пользователя (через сид-админа).
+func newAuthedServer(t *testing.T) (http.Handler, *http.Cookie) {
+	h, auth, _ := buildStack(t, false)
+	c := seedAdminAndLogin(t, h, auth, "owner@example.com", "password123")
+	return h, c
 }
 
 func TestCreateReturnsFragment(t *testing.T) {
-	h := newTestServer(t)
+	h, c := newAuthedServer(t)
 
 	form := url.Values{"title": {"Купить хлеб"}, "body": {"и молоко"}}
 	req := httptest.NewRequest("POST", "/notes", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(c)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -51,8 +178,6 @@ func TestCreateReturnsFragment(t *testing.T) {
 		t.Fatalf("ожидался 200, получен %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	// Ответ — ФРАГМЕНТ одной заметки (не полная страница): без <html>, с id="note-<ID>",
-	// который htmx адресует для замены/удаления.
 	if strings.Contains(body, "<html") {
 		t.Error("ответ POST должен быть фрагментом, а не полной страницей")
 	}
@@ -61,14 +186,9 @@ func TestCreateReturnsFragment(t *testing.T) {
 	}
 }
 
-// TestStaticServed — клиентская статика (htmx, app.css) раздаётся локально из
-// вшитого staticFS по /static/<имя>, без обращения к внешнему CDN.
 func TestStaticServed(t *testing.T) {
-	h := newTestServer(t)
-	for _, name := range []string{
-		"htmx.min.js",
-		"app.css",
-	} {
+	h, _ := newAuthedServer(t)
+	for _, name := range []string{"htmx.min.js", "app.css"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", "/static/"+name, nil))
 		if rec.Code != http.StatusOK {
@@ -81,15 +201,18 @@ func TestStaticServed(t *testing.T) {
 }
 
 func TestIndexShowsCreatedNote(t *testing.T) {
-	h := newTestServer(t)
+	h, c := newAuthedServer(t)
 
 	form := url.Values{"title": {"Видна в списке"}}
 	postReq := httptest.NewRequest("POST", "/notes", strings.NewReader(form.Encode()))
 	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	postReq.AddCookie(c)
 	h.ServeHTTP(httptest.NewRecorder(), postReq)
 
+	getReq := httptest.NewRequest("GET", "/", nil)
+	getReq.AddCookie(c)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	h.ServeHTTP(rec, getReq)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("ожидался 200, получен %d", rec.Code)
@@ -104,32 +227,42 @@ func TestIndexShowsCreatedNote(t *testing.T) {
 }
 
 func TestDeleteRemovesNote(t *testing.T) {
-	h := newTestServer(t)
+	h, c := newAuthedServer(t)
 
 	form := url.Values{"title": {"Удалить меня"}}
 	postReq := httptest.NewRequest("POST", "/notes", strings.NewReader(form.Encode()))
 	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	postReq.AddCookie(c)
 	postRec := httptest.NewRecorder()
 	h.ServeHTTP(postRec, postReq)
-	// id присвоен 1 (первая запись в чистой БД); проверим через список после удаления.
+	// id заметки берём из фрагмента ответа (устойчиво к нумерации).
+	m := noteIDRe.FindStringSubmatch(postRec.Body.String())
+	if m == nil {
+		t.Fatalf("не нашли id заметки в ответе: %s", postRec.Body.String())
+	}
+	id := m[1]
 
-	delReq := httptest.NewRequest("DELETE", "/notes/1", nil)
+	delReq := httptest.NewRequest("DELETE", "/notes/"+id, nil)
+	delReq.AddCookie(c)
 	delRec := httptest.NewRecorder()
 	h.ServeHTTP(delRec, delReq)
 	if delRec.Code != http.StatusOK {
 		t.Fatalf("ожидался 200 на удаление, получен %d", delRec.Code)
 	}
 
+	getReq := httptest.NewRequest("GET", "/", nil)
+	getReq.AddCookie(c)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	h.ServeHTTP(rec, getReq)
 	if strings.Contains(rec.Body.String(), "Удалить меня") {
 		t.Error("заметка должна быть удалена из списка")
 	}
 }
 
 func TestDeleteNotFound(t *testing.T) {
-	h := newTestServer(t)
+	h, c := newAuthedServer(t)
 	req := httptest.NewRequest("DELETE", "/notes/999", nil)
+	req.AddCookie(c)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {

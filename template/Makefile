@@ -1,8 +1,12 @@
-.PHONY: run build test vet docker docker-run tidy clean
+.PHONY: run build test vet check docker docker-run tidy clean
 
 # Локальный запуск (БД в текущем каталоге)
 run:
 	go run ./cmd/server
+
+# Проверка перед публикацией: сборка + статанализ + тесты одной командой.
+check:
+	go build ./... && go vet ./... && go test ./...
 
 # Сборка бинаря
 build:

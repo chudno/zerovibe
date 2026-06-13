@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/chudno/zerovibe/internal/adapter/platformmail"
 	"github.com/chudno/zerovibe/internal/platform/db"
 	"github.com/chudno/zerovibe/internal/repository/sqlite"
 	"github.com/chudno/zerovibe/internal/transport/web"
@@ -29,6 +31,15 @@ func main() {
 func run() error {
 	addr := env("ADDR", ":8080")
 	dbPath := env("DB_PATH", "file:zerovibe.db")
+	appBaseURL := env("APP_BASE_URL", "http://localhost:8080")
+	cookieName := env("SESSION_COOKIE", "zv_session")
+	secureCookie := envBool("SECURE_COOKIE", true)
+	// Платформа подставляет адрес API и сервис-ключ для отправки писем при деплое.
+	platformURL := os.Getenv("PLATFORM_API_URL")
+	platformKey := os.Getenv("PLATFORM_API_KEY")
+	// Сид первого админа (локальный путь; прод-механизм — отдельная задача).
+	adminEmail := os.Getenv("ADMIN_EMAIL")
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
 
 	// db (платформенный слой: SQLite + очередь записи)
 	database, err := db.Open(dbPath)
@@ -38,14 +49,50 @@ func run() error {
 	defer database.Close()
 
 	ctx := context.Background()
-	if err := database.Migrate(ctx, sqlite.Schema); err != nil {
+	if err := database.MigrateUp(ctx); err != nil {
 		return err
 	}
 
-	// repository → usecase → transport
-	repo := sqlite.NewNoteRepo(database)
-	notes := usecase.NewNoteService(repo)
-	srv, err := web.NewServer(notes)
+	// repository
+	noteRepo := sqlite.NewNoteRepo(database)
+	userRepo := sqlite.NewUserRepo(database)
+	sessRepo := sqlite.NewSessionRepo(database)
+	resetRepo := sqlite.NewResetRepo(database)
+	verifyRepo := sqlite.NewEmailVerificationRepo(database)
+	rlRepo := sqlite.NewRateLimitRepo(database)
+	settingRepo := sqlite.NewSettingRepo(database)
+
+	// adapters
+	mailer := platformmail.New(platformURL, platformKey)
+
+	// usecase
+	settings := usecase.NewSettingsService(settingRepo)
+	notes := usecase.NewNoteService(noteRepo)
+	auth := usecase.NewAuthService(
+		userRepo, sessRepo, resetRepo, verifyRepo, rlRepo,
+		usecase.NewBcryptHasher(), mailer, settings,
+		usecase.AuthConfig{
+			SessionTTL:      30 * 24 * time.Hour,
+			ResetTTL:        time.Hour,
+			VerifyTTL:       24 * time.Hour,
+			AppBaseURL:      appBaseURL,
+			LoginRateLimit:  usecase.RateRule{Limit: 5, Window: 15 * time.Minute},
+			ForgotRateLimit: usecase.RateRule{Limit: 3, Window: time.Hour},
+			ResendShortRate: usecase.RateRule{Limit: 1, Window: time.Minute},
+			ResendHourRate:  usecase.RateRule{Limit: 5, Window: time.Hour},
+		},
+	)
+
+	// Сид первого админа (идемпотентно; пустой env → no-op).
+	if err := auth.EnsureAdmin(ctx, adminEmail, adminPassword); err != nil {
+		return err
+	}
+
+	// transport
+	srv, err := web.NewServer(notes, auth, settings, web.Config{
+		SecureCookie: secureCookie,
+		CookieName:   cookieName,
+	})
 	if err != nil {
 		return err
 	}
@@ -78,6 +125,24 @@ func run() error {
 func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// envBool парсит булеву переменную окружения (1/true/yes/on → true); иначе fallback.
+func envBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	if b, err := strconv.ParseBool(v); err == nil {
+		return b
+	}
+	switch v {
+	case "yes", "on", "YES", "ON":
+		return true
+	case "no", "off", "NO", "OFF":
+		return false
 	}
 	return fallback
 }

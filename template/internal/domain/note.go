@@ -17,6 +17,7 @@ import (
 // полный вертикальный срез (domain → usecase → repository → transport).
 type Note struct {
 	ID        int64
+	OwnerID   int64 // владелец (пользователь); проставляет usecase из текущей сессии
 	Title     string
 	Body      string
 	CreatedAt time.Time

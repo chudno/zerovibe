@@ -1,0 +1,21 @@
+{{define "login"}}
+<div class="auth-wrap">
+	<div class="card auth-card">
+		{{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+		{{if .Err}}<p class="form-error">{{.Err}}</p>{{end}}
+		<form class="field" method="post" action="/login">
+			<label class="label">Email
+				<input class="input" type="email" name="email" autocomplete="username" required autofocus>
+			</label>
+			<label class="label">Пароль
+				<input class="input" type="password" name="password" autocomplete="current-password" required>
+			</label>
+			<button class="btn" type="submit">Войти</button>
+		</form>
+		<div class="auth-links">
+			<a class="navlink" href="/forgot">Забыли пароль?</a>
+			{{if .AllowSignup}}<a class="navlink" href="/register">Регистрация</a>{{end}}
+		</div>
+	</div>
+</div>
+{{end}}
