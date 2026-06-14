@@ -54,6 +54,10 @@ var (
 	// ErrEmailNotVerified — почта не подтверждена, а это требуется настройкой.
 	// → вход блокируется, показываем «подтвердите почту».
 	ErrEmailNotVerified = errors.New("подтвердите адрес почты по ссылке из письма")
+	// ErrSetupClosed — первичная настройка уже завершена (админ создан). → HTTP 410.
+	ErrSetupClosed = errors.New("первичная настройка уже завершена")
+	// ErrSetupToken — неверный setup-токен. → HTTP 403.
+	ErrSetupToken = errors.New("неверный код настройки")
 )
 
 // ErrRateLimited — превышен лимит попыток. → HTTP 429. Тип (не sentinel), чтобы нести

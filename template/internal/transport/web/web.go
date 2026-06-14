@@ -14,6 +14,7 @@ package web
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"html/template"
 	"net"
@@ -88,6 +89,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /reset", s.handleReset)
 	mux.HandleFunc("GET /verify-email", s.handleVerifyEmail)
 	mux.HandleFunc("POST /resend-verification", s.handleResendVerification)
+
+	// Первичная настройка: создать первого администратора по одноразовому коду.
+	// Доступна только пока админов нет; код печатается в лог при первом старте.
+	mux.HandleFunc("POST /setup", s.handleSetup)
 
 	// Служебное и статика.
 	mux.HandleFunc("GET /healthz", s.handleHealth)
@@ -301,6 +306,28 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	s.redirect(w, r, "/")
 }
 
+// handleSetup — первичная настройка: создаёт ПЕРВОГО администратора по одноразовому
+// коду (печатается в лог при первом старте). Это служебный API-эндпоинт, который
+// дёргает агент после деплоя, поэтому отвечает простым текстом + кодом, а не страницей.
+// Принимает поля email/password/token (form или JSON-тело).
+func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
+	email, password, token := r.FormValue("email"), r.FormValue("password"), r.FormValue("token")
+	// Допускаем и JSON-тело (агенту удобнее).
+	if email == "" && password == "" && token == "" {
+		var body struct{ Email, Password, Token string }
+		if json.NewDecoder(r.Body).Decode(&body) == nil {
+			email, password, token = body.Email, body.Password, body.Token
+		}
+	}
+
+	if err := s.auth.Setup(r.Context(), email, password, token); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	_, _ = w.Write([]byte("администратор создан, можно входить\n"))
+}
+
 func (s *Server) handleForgot(w http.ResponseWriter, r *http.Request) {
 	email := r.FormValue("email")
 	rateKey := domain.NormalizeEmail(email) + "|" + clientIP(r)
@@ -417,6 +444,10 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrInvalidToken):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, domain.ErrEmailNotVerified):
+		http.Error(w, err.Error(), http.StatusForbidden)
+	case errors.Is(err, domain.ErrSetupClosed):
+		http.Error(w, err.Error(), http.StatusGone)
+	case errors.Is(err, domain.ErrSetupToken):
 		http.Error(w, err.Error(), http.StatusForbidden)
 	case errors.Is(err, domain.ErrUnauthenticated):
 		if isHTMX(r) {

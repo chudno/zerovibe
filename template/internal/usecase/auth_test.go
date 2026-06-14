@@ -244,6 +244,12 @@ type authFakes struct {
 
 // buildAuthFull собирает AuthService с фейками и произвольными настройками.
 func buildAuthFull(flags map[string]bool) (*AuthService, authFakes) {
+	return buildAuthFullWithSetup(flags, "")
+}
+
+// buildAuthFullWithSetup как buildAuthFull, но задаёт код первичной настройки
+// (SetupToken). Пустой токен → /setup недоступен.
+func buildAuthFullWithSetup(flags map[string]bool, setupToken string) (*AuthService, authFakes) {
 	f := authFakes{
 		users:    newFakeUserRepo(),
 		sessions: newFakeSessionRepo(),
@@ -261,6 +267,7 @@ func buildAuthFull(flags map[string]bool) (*AuthService, authFakes) {
 		ForgotRateLimit: RateRule{Limit: 3, Window: time.Hour},
 		ResendShortRate: RateRule{Limit: 1, Window: time.Minute},
 		ResendHourRate:  RateRule{Limit: 5, Window: time.Hour},
+		SetupToken:      setupToken,
 	})
 	return svc, f
 }
@@ -510,30 +517,6 @@ func TestAuth_ConfirmReset_WeakPassword(t *testing.T) {
 	}
 }
 
-func TestAuth_EnsureAdmin_CreatesWhenAbsent(t *testing.T) {
-	svc, users, _, _, _, _ := buildAuth(false)
-	if err := svc.EnsureAdmin(context.Background(), "admin@b.com", "password123"); err != nil {
-		t.Fatalf("неожиданная ошибка: %v", err)
-	}
-	u, ok := users.byEmail["admin@b.com"]
-	if !ok {
-		t.Fatal("админ не создан")
-	}
-	if u.Role != domain.RoleAdmin {
-		t.Errorf("ожидалась роль admin, получено %q", u.Role)
-	}
-}
-
-func TestAuth_EnsureAdmin_Idempotent(t *testing.T) {
-	svc, users, _, _, _, _ := buildAuth(false)
-	ctx := context.Background()
-	_ = svc.EnsureAdmin(ctx, "admin@b.com", "password123")
-	_ = svc.EnsureAdmin(ctx, "admin2@b.com", "password123") // уже есть админ → не создаём второго
-	if len(users.byEmail) != 1 {
-		t.Errorf("ожидался ровно 1 админ, есть %d", len(users.byEmail))
-	}
-}
-
 // --- подтверждение почты ---
 
 func TestAuth_Register_VerifyOff_NoMail(t *testing.T) {
@@ -612,16 +595,6 @@ func TestAuth_ResendVerification_UnknownEmail_NoLeak(t *testing.T) {
 	}
 	if len(f.mailer.sent) != 0 {
 		t.Error("письмо не должно уходить для несуществующего email")
-	}
-}
-
-func TestAuth_EnsureAdmin_EmptyEnv_NoOp(t *testing.T) {
-	svc, users, _, _, _, _ := buildAuth(false)
-	if err := svc.EnsureAdmin(context.Background(), "", ""); err != nil {
-		t.Fatalf("пустой сид должен быть no-op, получено %v", err)
-	}
-	if len(users.byEmail) != 0 {
-		t.Error("при пустом env админ не должен создаваться")
 	}
 }
 
@@ -755,5 +728,79 @@ func TestAuth_SessionTokens_UniqueAndLong(t *testing.T) {
 	}
 	if len(sess.byToken) != 20 {
 		t.Errorf("ожидалось 20 уникальных сессий, есть %d", len(sess.byToken))
+	}
+}
+
+// --- первичная настройка (/setup) ---
+
+func TestAuth_Setup_CreatesFirstAdmin(t *testing.T) {
+	svc, f := buildAuthFullWithSetup(map[string]bool{}, "secret-code")
+	ctx := context.Background()
+	needed, err := svc.SetupNeeded(ctx)
+	if err != nil || !needed {
+		t.Fatalf("ожидалась доступная настройка: needed=%v err=%v", needed, err)
+	}
+	if err := svc.Setup(ctx, "admin@b.com", "password123", "secret-code"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	u, ok := f.users.byEmail["admin@b.com"]
+	if !ok || u.Role != domain.RoleAdmin {
+		t.Fatalf("ожидался созданный админ, получено %+v ok=%v", u, ok)
+	}
+}
+
+func TestAuth_Setup_WrongToken(t *testing.T) {
+	svc, _ := buildAuthFullWithSetup(map[string]bool{}, "secret-code")
+	ctx := context.Background()
+	if err := svc.Setup(ctx, "admin@b.com", "password123", "wrong-token"); !errors.Is(err, domain.ErrSetupToken) {
+		t.Fatalf("ожидалась ErrSetupToken, получено %v", err)
+	}
+}
+
+func TestAuth_Setup_DisabledWithoutToken(t *testing.T) {
+	// Пустой SetupToken → /setup недоступен (даже без админа).
+	svc, _ := buildAuthFullWithSetup(map[string]bool{}, "")
+	ctx := context.Background()
+	needed, err := svc.SetupNeeded(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if needed {
+		t.Error("без SetupToken первичная настройка должна быть недоступна")
+	}
+	if err := svc.Setup(ctx, "admin@b.com", "password123", ""); !errors.Is(err, domain.ErrSetupClosed) {
+		t.Fatalf("ожидалась ErrSetupClosed, получено %v", err)
+	}
+}
+
+func TestAuth_Setup_ClosedAfterFirstAdmin(t *testing.T) {
+	svc, _ := buildAuthFullWithSetup(map[string]bool{}, "secret-code")
+	ctx := context.Background()
+	if err := svc.Setup(ctx, "admin@b.com", "password123", "secret-code"); err != nil {
+		t.Fatal(err)
+	}
+	// повторный вызов тем же токеном → закрыто
+	if err := svc.Setup(ctx, "other@b.com", "password123", "secret-code"); !errors.Is(err, domain.ErrSetupClosed) {
+		t.Fatalf("повторный setup должен быть закрыт (ErrSetupClosed), получено %v", err)
+	}
+}
+
+func TestAuth_SetupNeeded_FalseWhenAdminExists(t *testing.T) {
+	svc, _ := buildAuthFullWithSetup(map[string]bool{}, "secret-code")
+	ctx := context.Background()
+	// сначала заведём админа через первичную настройку
+	if err := svc.Setup(ctx, "admin@b.com", "password123", "secret-code"); err != nil {
+		t.Fatal(err)
+	}
+	needed, err := svc.SetupNeeded(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if needed {
+		t.Error("при существующем админе setup не нужен")
+	}
+	// и /setup закрыт
+	if err := svc.Setup(ctx, "x@b.com", "password123", "secret-code"); !errors.Is(err, domain.ErrSetupClosed) {
+		t.Fatalf("ожидалась ErrSetupClosed, получено %v", err)
 	}
 }

@@ -35,7 +35,7 @@ func TestLogin_SetsCookie(t *testing.T) {
 
 func TestLogin_WrongPassword_401(t *testing.T) {
 	h, auth, _ := buildStack(t, false)
-	if err := auth.EnsureAdmin(context.Background(), "a@b.com", "password123"); err != nil {
+	if err := auth.Setup(context.Background(), "a@b.com", "password123", testSetupToken); err != nil {
 		t.Fatal(err)
 	}
 	rec := postForm(h, "/login", url.Values{"email": {"a@b.com"}, "password": {"wrongpass1"}}, nil)
@@ -151,7 +151,7 @@ func TestReset_ChangesPassword(t *testing.T) {
 	// Соберём стек с мейлером-перехватчиком, чтобы достать токен из письма.
 	h, auth, _ := buildStackWithMailer(t, false)
 	ctx := context.Background()
-	if err := auth.EnsureAdmin(ctx, "a@b.com", "password123"); err != nil {
+	if err := auth.Setup(ctx, "a@b.com", "password123", testSetupToken); err != nil {
 		t.Fatal(err)
 	}
 	// запросим сброс через usecase напрямую (транспорт forgot не отдаёт токен)
@@ -188,7 +188,7 @@ func TestReset_BadToken_400Ish(t *testing.T) {
 
 func TestLoginRateLimited_429(t *testing.T) {
 	h, auth, _ := buildStack(t, false)
-	if err := auth.EnsureAdmin(context.Background(), "a@b.com", "password123"); err != nil {
+	if err := auth.Setup(context.Background(), "a@b.com", "password123", testSetupToken); err != nil {
 		t.Fatal(err)
 	}
 	// лимит логина 5/15мин → 6-я неверная попытка по тому же email → 429
@@ -306,5 +306,35 @@ func TestAdminSettings_RequiresAdmin(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("не-админ на /admin/settings должен получить 403, получен %d", rec.Code)
+	}
+}
+
+func TestSetup_CreatesFirstAdminThenClosed(t *testing.T) {
+	h, auth, _ := buildStack(t, false)
+	needed, err := auth.SetupNeeded(context.Background())
+	if err != nil || !needed {
+		t.Fatalf("ожидалась доступная настройка: needed=%v err=%v", needed, err)
+	}
+
+	// неверный токен → 403
+	bad := postForm(h, "/setup", url.Values{"email": {"a@b.com"}, "password": {"password123"}, "token": {"nope"}}, nil)
+	if bad.Code != http.StatusForbidden {
+		t.Errorf("неверный токен → ожидался 403, получен %d", bad.Code)
+	}
+
+	// верный токен → 201, админ создан
+	ok := postForm(h, "/setup", url.Values{"email": {"a@b.com"}, "password": {"password123"}, "token": {testSetupToken}}, nil)
+	if ok.Code != http.StatusCreated {
+		t.Fatalf("создание админа → ожидался 201, получен %d: %s", ok.Code, ok.Body.String())
+	}
+	// созданный админ может войти
+	if c := loginCookie(t, h, "a@b.com", "password123"); c.Value == "" {
+		t.Error("созданный через /setup админ должен входить")
+	}
+
+	// повторный /setup → 410 (закрыто)
+	again := postForm(h, "/setup", url.Values{"email": {"x@b.com"}, "password": {"password123"}, "token": {testSetupToken}}, nil)
+	if again.Code != http.StatusGone {
+		t.Errorf("повторный /setup → ожидался 410, получен %d", again.Code)
 	}
 }

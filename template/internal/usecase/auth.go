@@ -7,6 +7,7 @@ package usecase
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -130,6 +131,10 @@ type AuthConfig struct {
 	// письмами, длинное — часовой потолок), оба должны разрешать.
 	ResendShortRate RateRule
 	ResendHourRate  RateRule
+	// SetupToken — код первичной настройки для создания первого админа через /setup.
+	// Задаётся снаружи (env SETUP_TOKEN, передаётся плагином при деплое). Пустой →
+	// /setup недоступен. Работает только пока в системе нет ни одного админа.
+	SetupToken string
 }
 
 // AuthService оркеструет регистрацию/вход/сессии/сброс пароля/подтверждение почты.
@@ -350,25 +355,39 @@ func (s *AuthService) ConfirmReset(ctx context.Context, token, newPassword strin
 	return s.sessions.DeleteByUser(ctx, pr.UserID)
 }
 
-// EnsureAdmin идемпотентно создаёт первого администратора. Пустые email/пароль →
-// no-op (сид не настроен — это нормально). Если админ уже есть — ничего не делает.
-// Как именно вызывается в проде — см. план (открытый вопрос); метод универсален.
-func (s *AuthService) EnsureAdmin(ctx context.Context, email, password string) error {
-	if email == "" || password == "" {
-		return nil
+// SetupNeeded сообщает, доступна ли первичная настройка: задан код SetupToken И в
+// системе ещё нет ни одного админа. Используется composition root (вывести подсказку
+// в лог) и при необходимости транспортом.
+func (s *AuthService) SetupNeeded(ctx context.Context) (bool, error) {
+	if s.cfg.SetupToken == "" {
+		return false, nil
 	}
-	// CountAdmins + Create не атомарны: при двух параллельных стартах теоретически
-	// можно создать двух админов. Для шаблона это неактуально — приложение
-	// разворачивается одним экземпляром контейнера, EnsureAdmin вызывается один раз
-	// при старте до приёма трафика. Защиту от гонки (UNIQUE/транзакция) не вводим —
-	// она усложнила бы код без реальной пользы для этого класса приложений.
+	n, err := s.users.CountAdmins(ctx)
+	if err != nil {
+		return false, err
+	}
+	return n == 0, nil
+}
+
+// Setup создаёт ПЕРВОГО администратора по коду первичной настройки (SetupToken,
+// заданному снаружи). Код не задан или админ уже есть → ErrSetupClosed. Неверный
+// код → ErrSetupToken. После создания админа CountAdmins>0 → /setup закрыт навсегда.
+func (s *AuthService) Setup(ctx context.Context, email, password, token string) error {
+	if s.cfg.SetupToken == "" {
+		return domain.ErrSetupClosed
+	}
 	n, err := s.users.CountAdmins(ctx)
 	if err != nil {
 		return err
 	}
 	if n > 0 {
-		return nil // админ уже есть
+		return domain.ErrSetupClosed // админ уже есть — настройка завершена
 	}
+	// Сравнение в постоянном времени, чтобы код нельзя было подобрать по таймингу.
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.SetupToken)) != 1 {
+		return domain.ErrSetupToken
+	}
+
 	u, err := domain.NewUser(email, password, domain.RoleAdmin)
 	if err != nil {
 		return err
