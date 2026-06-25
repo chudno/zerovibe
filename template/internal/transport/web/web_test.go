@@ -46,6 +46,11 @@ func (captureMailer) Send(_ context.Context, m usecase.Email) error {
 }
 
 // buildStackWithMailer — как buildStack, но с мейлером-перехватчиком токена сброса.
+// testSetupToken — код первичной настройки, заданный в тестовом стеке. Совпадает с
+// тем, что в проде задаёт плагин через env SETUP_TOKEN. /setup доступен, только пока
+// в системе нет ни одного админа.
+const testSetupToken = "test-setup-token"
+
 func buildStackWithMailer(t *testing.T, allowSignup bool) (http.Handler, *usecase.AuthService, *usecase.SettingsService) {
 	t.Helper()
 	capturedToken = ""
@@ -77,6 +82,7 @@ func buildStackWithMailer(t *testing.T, allowSignup bool) (http.Handler, *usecas
 			ForgotRateLimit: usecase.RateRule{Limit: 3, Window: time.Hour},
 			ResendShortRate: usecase.RateRule{Limit: 1, Window: time.Minute},
 			ResendHourRate:  usecase.RateRule{Limit: 5, Window: time.Hour},
+			SetupToken:      testSetupToken,
 		},
 	)
 	srv, err := NewServer(notes, auth, settings, Config{SecureCookie: false, CookieName: "zv_session"})
@@ -120,6 +126,7 @@ func buildStack(t *testing.T, allowSignup bool) (http.Handler, *usecase.AuthServ
 			ForgotRateLimit: usecase.RateRule{Limit: 3, Window: time.Hour},
 			ResendShortRate: usecase.RateRule{Limit: 1, Window: time.Minute},
 			ResendHourRate:  usecase.RateRule{Limit: 5, Window: time.Hour},
+			SetupToken:      testSetupToken,
 		},
 	)
 	srv, err := NewServer(notes, auth, settings, Config{SecureCookie: false, CookieName: "zv_session"})
@@ -129,10 +136,11 @@ func buildStack(t *testing.T, allowSignup bool) (http.Handler, *usecase.AuthServ
 	return srv.Routes(), auth, settings
 }
 
-// seedAdminAndLogin создаёт админа и возвращает cookie его сессии.
+// seedAdminAndLogin создаёт первого админа (через первичную настройку по тестовому
+// коду) и возвращает cookie его сессии. Идёт тем же путём, что и прод — /setup.
 func seedAdminAndLogin(t *testing.T, h http.Handler, auth *usecase.AuthService, email, pass string) *http.Cookie {
 	t.Helper()
-	if err := auth.EnsureAdmin(context.Background(), email, pass); err != nil {
+	if err := auth.Setup(context.Background(), email, pass, testSetupToken); err != nil {
 		t.Fatalf("сид админа: %v", err)
 	}
 	return loginCookie(t, h, email, pass)

@@ -37,9 +37,10 @@ func run() error {
 	// Платформа подставляет адрес API и сервис-ключ для отправки писем при деплое.
 	platformURL := os.Getenv("PLATFORM_API_URL")
 	platformKey := os.Getenv("PLATFORM_API_KEY")
-	// Сид первого админа (локальный путь; прод-механизм — отдельная задача).
-	adminEmail := os.Getenv("ADMIN_EMAIL")
-	adminPassword := os.Getenv("ADMIN_PASSWORD")
+	// Первый админ создаётся через POST /setup по одноразовому коду SETUP_TOKEN.
+	// Код задаёт и передаёт платформа при деплое (env); локально его можно задать
+	// в .env. Это единственный путь — отдельного сида из env-кредов нет.
+	setupToken := os.Getenv("SETUP_TOKEN")
 
 	// db (платформенный слой: SQLite + очередь записи)
 	database, err := db.Open(dbPath)
@@ -80,12 +81,19 @@ func run() error {
 			ForgotRateLimit: usecase.RateRule{Limit: 3, Window: time.Hour},
 			ResendShortRate: usecase.RateRule{Limit: 1, Window: time.Minute},
 			ResendHourRate:  usecase.RateRule{Limit: 5, Window: time.Hour},
+			SetupToken:      setupToken,
 		},
 	)
 
-	// Сид первого админа (идемпотентно; пустой env → no-op).
-	if err := auth.EnsureAdmin(ctx, adminEmail, adminPassword); err != nil {
+	// Первый администратор создаётся через /setup по коду SETUP_TOKEN: код задаёт и
+	// передаёт платформа при деплое (env), приложение его только читает. После деплоя
+	// вайбкодер открывает /setup и задаёт свой email/пароль. /setup работает, только
+	// пока админа ещё нет — после создания первого закрывается навсегда.
+	if needed, err := auth.SetupNeeded(ctx); err != nil {
 		return err
+	} else if needed {
+		log.Print("ПЕРВИЧНАЯ НАСТРОЙКА: админ ещё не создан. Создайте его вызовом POST /setup " +
+			"с полями email, password и кодом настройки (SETUP_TOKEN).")
 	}
 
 	// transport

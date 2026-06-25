@@ -33,13 +33,21 @@ func TestLogin_SetsCookie(t *testing.T) {
 	}
 }
 
-func TestLogin_WrongPassword_401(t *testing.T) {
+// Неверный пароль на форме входа: страница перерисовывается с ошибкой (200, НЕ 401 —
+// форма того же origin показывает текст ошибки), сессионная cookie не ставится.
+func TestLogin_WrongPassword_RerendersFormNoCookie(t *testing.T) {
 	h, auth, _ := buildStack(t, false)
-	if err := auth.EnsureAdmin(context.Background(), "a@b.com", "password123"); err != nil {
+	if err := auth.Setup(context.Background(), "a@b.com", "password123", testSetupToken); err != nil {
 		t.Fatal(err)
 	}
 	rec := postForm(h, "/login", url.Values{"email": {"a@b.com"}, "password": {"wrongpass1"}}, nil)
-	// форма перерисовывается с ошибкой; cookie не ставится
+	if rec.Code != http.StatusOK {
+		t.Errorf("форма входа с ошибкой перерисовывается со статусом 200, получен %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "неверный email или пароль") {
+		t.Errorf("ожидался текст ошибки на перерисованной форме, тело: %s", rec.Body.String())
+	}
+	// cookie сессии не ставится
 	for _, ck := range rec.Result().Cookies() {
 		if ck.Name == "zv_session" && ck.Value != "" {
 			t.Error("при неверном пароле cookie сессии не должна ставиться")
@@ -151,7 +159,7 @@ func TestReset_ChangesPassword(t *testing.T) {
 	// Соберём стек с мейлером-перехватчиком, чтобы достать токен из письма.
 	h, auth, _ := buildStackWithMailer(t, false)
 	ctx := context.Background()
-	if err := auth.EnsureAdmin(ctx, "a@b.com", "password123"); err != nil {
+	if err := auth.Setup(ctx, "a@b.com", "password123", testSetupToken); err != nil {
 		t.Fatal(err)
 	}
 	// запросим сброс через usecase напрямую (транспорт forgot не отдаёт токен)
@@ -188,7 +196,7 @@ func TestReset_BadToken_400Ish(t *testing.T) {
 
 func TestLoginRateLimited_429(t *testing.T) {
 	h, auth, _ := buildStack(t, false)
-	if err := auth.EnsureAdmin(context.Background(), "a@b.com", "password123"); err != nil {
+	if err := auth.Setup(context.Background(), "a@b.com", "password123", testSetupToken); err != nil {
 		t.Fatal(err)
 	}
 	// лимит логина 5/15мин → 6-я неверная попытка по тому же email → 429
@@ -306,5 +314,158 @@ func TestAdminSettings_RequiresAdmin(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("не-админ на /admin/settings должен получить 403, получен %d", rec.Code)
+	}
+}
+
+func TestSetup_CreatesFirstAdminThenClosed(t *testing.T) {
+	h, auth, _ := buildStack(t, false)
+	needed, err := auth.SetupNeeded(context.Background())
+	if err != nil || !needed {
+		t.Fatalf("ожидалась доступная настройка: needed=%v err=%v", needed, err)
+	}
+
+	// неверный токен → 403
+	bad := postForm(h, "/setup", url.Values{"email": {"a@b.com"}, "password": {"password123"}, "token": {"nope"}}, nil)
+	if bad.Code != http.StatusForbidden {
+		t.Errorf("неверный токен → ожидался 403, получен %d", bad.Code)
+	}
+
+	// верный токен → 201, админ создан
+	ok := postForm(h, "/setup", url.Values{"email": {"a@b.com"}, "password": {"password123"}, "token": {testSetupToken}}, nil)
+	if ok.Code != http.StatusCreated {
+		t.Fatalf("создание админа → ожидался 201, получен %d: %s", ok.Code, ok.Body.String())
+	}
+	// созданный админ может войти
+	if c := loginCookie(t, h, "a@b.com", "password123"); c.Value == "" {
+		t.Error("созданный через /setup админ должен входить")
+	}
+
+	// повторный /setup → 410 (закрыто)
+	again := postForm(h, "/setup", url.Values{"email": {"x@b.com"}, "password": {"password123"}, "token": {testSetupToken}}, nil)
+	if again.Code != http.StatusGone {
+		t.Errorf("повторный /setup → ожидался 410, получен %d", again.Code)
+	}
+}
+
+// /setup принимает не только form, но и JSON-тело (агенту после деплоя так удобнее).
+func TestSetup_AcceptsJSONBody(t *testing.T) {
+	h, _, _ := buildStack(t, false)
+	body := strings.NewReader(`{"email":"a@b.com","password":"password123","token":"` + testSetupToken + `"}`)
+	req := httptest.NewRequest("POST", "/setup", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("JSON /setup → ожидался 201, получен %d: %s", rec.Code, rec.Body.String())
+	}
+	// созданный админ реально входит
+	if c := loginCookie(t, h, "a@b.com", "password123"); c.Value == "" {
+		t.Error("админ, созданный через JSON /setup, должен входить")
+	}
+}
+
+// --- GET-страницы (публичные) отдаются (закрываем 0%-покрытие страниц) ---
+
+func TestPublicPages_RenderForGuest(t *testing.T) {
+	h, _, _ := buildStack(t, true) // allowSignup=true, чтобы /register имел смысл
+	for _, path := range []string{"/login", "/register", "/forgot", "/reset?token=abc"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s: ожидался 200, получен %d", path, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "<html") {
+			t.Errorf("GET %s: ожидалась полная страница", path)
+		}
+	}
+}
+
+// Залогиненного пользователя страницы входа/регистрации перенаправляют на / (303),
+// чтобы он не видел форму входа поверх уже активной сессии.
+func TestLoginRegisterPages_RedirectWhenAuthed(t *testing.T) {
+	h, auth, _ := buildStack(t, true)
+	c := seedAdminAndLogin(t, h, auth, "a@b.com", "password123")
+	for _, path := range []string{"/login", "/register"} {
+		req := httptest.NewRequest("GET", path, nil)
+		req.AddCookie(c)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther {
+			t.Errorf("GET %s залогиненным → ожидался 303, получен %d", path, rec.Code)
+		}
+		if loc := rec.Header().Get("Location"); loc != "/" {
+			t.Errorf("GET %s залогиненным → Location %q, ожидался /", path, loc)
+		}
+	}
+}
+
+// Страница настроек доступна админу и отдаёт известные настройки.
+func TestSettingsPage_RendersForAdmin(t *testing.T) {
+	h, auth, _ := buildStack(t, false)
+	c := seedAdminAndLogin(t, h, auth, "admin@b.com", "password123")
+	req := httptest.NewRequest("GET", "/admin/settings", nil)
+	req.AddCookie(c)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("админ на /admin/settings → ожидался 200, получен %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "allow_signup") {
+		t.Error("страница настроек должна показывать allow_signup")
+	}
+}
+
+// PUT /admin/settings меняет настройку: после включения allow_signup регистрация
+// открывается (проверяем сквозной эффект, а не только код ответа).
+func TestSetSetting_AdminTogglesSignup(t *testing.T) {
+	h, auth, settings := buildStack(t, false) // регистрация изначально закрыта
+	c := seedAdminAndLogin(t, h, auth, "admin@b.com", "password123")
+
+	form := url.Values{"key": {"allow_signup"}, "value": {"true"}}
+	req := httptest.NewRequest("PUT", "/admin/settings", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(c)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("PUT /admin/settings → ожидался 204, получен %d: %s", rec.Code, rec.Body.String())
+	}
+	// эффект: настройка реально записана
+	if on, _ := settings.Bool(context.Background(), "allow_signup"); !on {
+		t.Error("после PUT allow_signup должна быть включена")
+	}
+}
+
+// PUT /admin/settings запрещён гостю (требует роль admin).
+func TestSetSetting_RequiresAdmin(t *testing.T) {
+	h, _, _ := buildStack(t, false)
+	form := url.Values{"key": {"allow_signup"}, "value": {"true"}}
+	req := httptest.NewRequest("PUT", "/admin/settings", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	// гость без сессии → редирект на вход (303), не применяем настройку
+	if rec.Code != http.StatusSeeOther {
+		t.Errorf("гость на PUT /admin/settings → ожидался редирект 303, получен %d", rec.Code)
+	}
+}
+
+// /healthz отвечает 200 без аутентификации (для healthcheck платформы/контейнера).
+func TestHealthz_OK(t *testing.T) {
+	h, _, _ := buildStack(t, false)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/healthz", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /healthz → ожидался 200, получен %d", rec.Code)
+	}
+}
+
+// POST /resend-verification всегда отвечает страницей (200) и не раскрывает, есть ли
+// такой email (анти-enumeration на уровне транспорта).
+func TestResendVerification_NoEnumeration(t *testing.T) {
+	h, _, _ := buildStack(t, false)
+	rec := postForm(h, "/resend-verification", url.Values{"email": {"nobody@b.com"}}, nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("POST /resend-verification → ожидался 200, получен %d", rec.Code)
 	}
 }
