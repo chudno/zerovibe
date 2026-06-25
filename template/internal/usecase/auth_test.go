@@ -192,25 +192,36 @@ func (f *fakeVerifyRepo) DeleteByUser(_ context.Context, userID int64) error {
 	return nil
 }
 
-// fakeRateLimiter: allow управляется флагом.
+// fakeRateLimiter: учитывает вызовы по ключам и умеет денаить либо всё (deny), либо
+// точечно отдельные ключи (denyKeys) — чтобы тесты различали окна/ключи лимитов.
 type fakeRateLimiter struct {
-	deny  bool
-	calls int
+	deny     bool           // денаить любой ключ (грубый общий запрет)
+	denyKeys map[string]bool // денаить конкретные ключи (точечно)
+	calls    int            // всего вызовов (обратная совместимость)
+	byKey    map[string]int // вызовов на каждый ключ
 }
 
-func (f *fakeRateLimiter) Allow(_ context.Context, _ string, _ int, _ time.Duration, _ time.Time) (bool, time.Duration, error) {
+func (f *fakeRateLimiter) Allow(_ context.Context, key string, _ int, _ time.Duration, _ time.Time) (bool, time.Duration, error) {
 	f.calls++
-	if f.deny {
+	if f.byKey == nil {
+		f.byKey = map[string]int{}
+	}
+	f.byKey[key]++
+	if f.deny || f.denyKeys[key] {
 		return false, 5 * time.Minute, nil
 	}
 	return true, 0, nil
 }
 
-// fakeHasher: тривиальный, без цены bcrypt.
-type fakeHasher struct{}
+// fakeHasher: тривиальный, без цены bcrypt. Считает вызовы Compare — чтобы проверить
+// тайминг-эквалайзер (Compare прогоняется и для несуществующего пользователя).
+type fakeHasher struct {
+	compareCalls int
+}
 
-func (fakeHasher) Hash(plain string) (string, error) { return "hash:" + plain, nil }
-func (fakeHasher) Compare(hash, plain string) error {
+func (*fakeHasher) Hash(plain string) (string, error) { return "hash:" + plain, nil }
+func (f *fakeHasher) Compare(hash, plain string) error {
+	f.compareCalls++
 	if hash == "hash:"+plain {
 		return nil
 	}
@@ -240,6 +251,7 @@ type authFakes struct {
 	verifies *fakeVerifyRepo
 	rl       *fakeRateLimiter
 	mailer   *fakeMailer
+	hasher   *fakeHasher
 }
 
 // buildAuthFull собирает AuthService с фейками и произвольными настройками.
@@ -257,8 +269,9 @@ func buildAuthFullWithSetup(flags map[string]bool, setupToken string) (*AuthServ
 		verifies: newFakeVerifyRepo(),
 		rl:       &fakeRateLimiter{},
 		mailer:   &fakeMailer{},
+		hasher:   &fakeHasher{},
 	}
-	svc := NewAuthService(f.users, f.sessions, f.resets, f.verifies, f.rl, fakeHasher{}, f.mailer, fakeSettings{flags: flags}, AuthConfig{
+	svc := NewAuthService(f.users, f.sessions, f.resets, f.verifies, f.rl, f.hasher, f.mailer, fakeSettings{flags: flags}, AuthConfig{
 		SessionTTL:      time.Hour,
 		ResetTTL:        time.Hour,
 		VerifyTTL:       24 * time.Hour,
@@ -803,4 +816,220 @@ func TestAuth_SetupNeeded_FalseWhenAdminExists(t *testing.T) {
 	if err := svc.Setup(ctx, "x@b.com", "password123", "secret-code"); !errors.Is(err, domain.ErrSetupClosed) {
 		t.Fatalf("ожидалась ErrSetupClosed, получено %v", err)
 	}
+}
+
+// --- security-инварианты (по аудиту тестов) ---
+
+// Logout должен инвалидировать сессию на СЕРВЕРЕ, а не только погасить cookie:
+// после Logout(token) Authenticate(token) обязан вернуть ErrUnauthenticated.
+func TestAuth_Logout_InvalidatesSession(t *testing.T) {
+	svc, f := buildAuthFull(map[string]bool{"allow_signup": true})
+	ctx := context.Background()
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	s, err := svc.Login(ctx, "a@b.com", "password123", "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// сессия живёт до логаута
+	if _, err := svc.Authenticate(ctx, s.Token); err != nil {
+		t.Fatalf("до логаута сессия должна быть валидна, получено %v", err)
+	}
+	if err := svc.Logout(ctx, s.Token); err != nil {
+		t.Fatalf("logout: %v", err)
+	}
+	// после логаута — недействительна на сервере
+	if _, err := svc.Authenticate(ctx, s.Token); !errors.Is(err, domain.ErrUnauthenticated) {
+		t.Fatalf("после логаута Authenticate должен дать ErrUnauthenticated, получено %v", err)
+	}
+	if _, ok := f.sessions.byToken[s.Token]; ok {
+		t.Error("сессия должна быть удалена из хранилища")
+	}
+}
+
+// Повторный RequestReset должен инвалидировать ПРЕЖНИЙ токен сброса (иначе утёкший
+// старый токен оставался бы живым). Первый токен после второго запроса нерабочий.
+func TestAuth_RequestReset_InvalidatesOldToken(t *testing.T) {
+	svc, f := buildAuthFull(map[string]bool{"allow_signup": true})
+	ctx := context.Background()
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RequestReset(ctx, "a@b.com", "k"); err != nil {
+		t.Fatal(err)
+	}
+	first := onlyResetToken(t, f)
+
+	if err := svc.RequestReset(ctx, "a@b.com", "k"); err != nil {
+		t.Fatal(err)
+	}
+	// после второго запроса прежний токен не должен работать
+	if err := svc.ConfirmReset(ctx, first, "newpassword1"); !errors.Is(err, domain.ErrInvalidToken) {
+		t.Fatalf("старый reset-токен должен быть инвалидирован, получено %v", err)
+	}
+	// а ровно один новый токен — рабочий
+	if len(f.resets.byToken) != 1 {
+		t.Errorf("ожидался ровно 1 активный токен сброса, есть %d", len(f.resets.byToken))
+	}
+}
+
+// ConfirmReset должен снести ВСЕ сессии пользователя (а не одну) — сброс пароля
+// разлогинивает на всех устройствах.
+func TestAuth_ConfirmReset_KillsAllSessions(t *testing.T) {
+	svc, f := buildAuthFull(map[string]bool{"allow_signup": true})
+	ctx := context.Background()
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	// три устройства = три сессии
+	for i := 0; i < 3; i++ {
+		if _, err := svc.Login(ctx, "a@b.com", "password123", "k"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(f.sessions.byToken) != 3 {
+		t.Fatalf("ожидалось 3 сессии, есть %d", len(f.sessions.byToken))
+	}
+	if err := svc.RequestReset(ctx, "a@b.com", "k"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ConfirmReset(ctx, onlyResetToken(t, f), "newpassword1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.sessions.byToken) != 0 {
+		t.Errorf("после сброса пароля все сессии должны быть сняты, осталось %d", len(f.sessions.byToken))
+	}
+}
+
+// Анти-enumeration по ТАЙМИНГУ: для несуществующего пользователя Login всё равно
+// прогоняет Compare (против заглушки), чтобы по времени ответа нельзя было отличить
+// «нет email» от «неверный пароль». Закрепляем сам факт вызова Compare.
+func TestAuth_Login_UnknownUser_RunsCompare(t *testing.T) {
+	svc, f := buildAuthFull(map[string]bool{"allow_signup": true})
+	ctx := context.Background()
+	_, err := svc.Login(ctx, "nobody@b.com", "password123", "k")
+	if !errors.Is(err, domain.ErrInvalidCredentials) {
+		t.Fatalf("ожидалась ErrInvalidCredentials, получено %v", err)
+	}
+	if f.hasher.compareCalls != 1 {
+		t.Errorf("для несуществующего пользователя Compare должен вызываться ровно 1 раз "+
+			"(тайминг-эквалайзер), вызвано %d", f.hasher.compareCalls)
+	}
+}
+
+// login и forgot должны использовать РАЗНЫЕ ключи рейт-лимита — исчерпание одного не
+// должно блокировать другой по тому же rateKey.
+func TestAuth_RateLimit_LoginAndForgot_DistinctKeys(t *testing.T) {
+	svc, f := buildAuthFull(map[string]bool{"allow_signup": true})
+	ctx := context.Background()
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	const rateKey = "a@b.com|1.2.3.4"
+	if _, err := svc.Login(ctx, "a@b.com", "password123", rateKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RequestReset(ctx, "a@b.com", rateKey); err != nil {
+		t.Fatal(err)
+	}
+	// ключи различны → у каждого ровно один вызов
+	if got := f.rl.byKey["login:"+rateKey]; got != 1 {
+		t.Errorf("login должен учитываться по ключу login:%s (вызовов %d)", rateKey, got)
+	}
+	if got := f.rl.byKey["forgot:"+rateKey]; got != 1 {
+		t.Errorf("forgot должен учитываться по ключу forgot:%s (вызовов %d)", rateKey, got)
+	}
+}
+
+// Resend подтверждения почты ограничен ДВУМЯ окнами: короткое (пауза между письмами)
+// и часовой потолок. Это разные ключи лимита — проверяем, что оба проверяются и что
+// срабатывание часового окна (при разрешённом коротком) блокирует отправку.
+func TestAuth_ResendVerification_TwoWindows(t *testing.T) {
+	svc, f := buildAuthFull(map[string]bool{"require_email_verification": true})
+	ctx := context.Background()
+	const rateKey = "a@b.com|ip"
+	// оба окна проверяются (разные ключи)
+	if err := svc.ResendVerification(ctx, "a@b.com", rateKey); err != nil {
+		t.Fatal(err)
+	}
+	if f.rl.byKey["resend-short:"+rateKey] != 1 || f.rl.byKey["resend-hour:"+rateKey] != 1 {
+		t.Fatalf("должны проверяться ОБА окна resend, получено short=%d hour=%d",
+			f.rl.byKey["resend-short:"+rateKey], f.rl.byKey["resend-hour:"+rateKey])
+	}
+	// часовой потолок исчерпан, короткое окно свободно → отправка всё равно блокируется
+	f.rl.denyKeys = map[string]bool{"resend-hour:" + rateKey: true}
+	err := svc.ResendVerification(ctx, "a@b.com", rateKey)
+	var re domain.ErrRateLimited
+	if !errors.As(err, &re) {
+		t.Fatalf("при исчерпанном часовом окне ожидалась ErrRateLimited, получено %v", err)
+	}
+}
+
+// Истёкший verify-токен не подтверждает почту (по аналогии с reset).
+func TestAuth_ConfirmEmailVerification_Expired(t *testing.T) {
+	svc, f := buildAuthFull(map[string]bool{"allow_signup": true})
+	ctx := context.Background()
+	u, err := svc.Register(ctx, "a@b.com", "password123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// кладём заведомо истёкший токен
+	expired := domain.EmailVerification{
+		Token:     "verify-expired",
+		UserID:    u.ID,
+		CreatedAt: time.Now().Add(-48 * time.Hour),
+		ExpiresAt: time.Now().Add(-24 * time.Hour),
+	}
+	if err := f.verifies.Create(ctx, expired); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ConfirmEmailVerification(ctx, "verify-expired"); !errors.Is(err, domain.ErrInvalidToken) {
+		t.Fatalf("истёкший verify-токен должен дать ErrInvalidToken, получено %v", err)
+	}
+}
+
+// Повторная отправка письма подтверждения инвалидирует ПРЕЖНИЙ verify-токен
+// (issueAndSendVerification удаляет старые токены пользователя перед выпуском нового).
+func TestAuth_ResendVerification_InvalidatesOldToken(t *testing.T) {
+	svc, f := buildAuthFull(map[string]bool{"allow_signup": true, "require_email_verification": true})
+	ctx := context.Background()
+	if _, err := svc.Register(ctx, "a@b.com", "password123"); err != nil {
+		t.Fatal(err)
+	}
+	first := onlyVerifyToken(t, f)
+	if err := svc.ResendVerification(ctx, "a@b.com", "k"); err != nil {
+		t.Fatal(err)
+	}
+	// прежний токен не должен подтверждать почту
+	if err := svc.ConfirmEmailVerification(ctx, first); !errors.Is(err, domain.ErrInvalidToken) {
+		t.Fatalf("старый verify-токен должен быть инвалидирован, получено %v", err)
+	}
+	if len(f.verifies.byToken) != 1 {
+		t.Errorf("ожидался ровно 1 активный verify-токен, есть %d", len(f.verifies.byToken))
+	}
+}
+
+// onlyResetToken возвращает единственный токен сброса (фейл, если их не ровно один).
+func onlyResetToken(t *testing.T, f authFakes) string {
+	t.Helper()
+	if len(f.resets.byToken) != 1 {
+		t.Fatalf("ожидался ровно 1 токен сброса, есть %d", len(f.resets.byToken))
+	}
+	for tk := range f.resets.byToken {
+		return tk
+	}
+	return ""
+}
+
+// onlyVerifyToken возвращает единственный verify-токен (фейл, если их не ровно один).
+func onlyVerifyToken(t *testing.T, f authFakes) string {
+	t.Helper()
+	if len(f.verifies.byToken) != 1 {
+		t.Fatalf("ожидался ровно 1 verify-токен, есть %d", len(f.verifies.byToken))
+	}
+	for tk := range f.verifies.byToken {
+		return tk
+	}
+	return ""
 }
