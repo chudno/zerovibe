@@ -1,7 +1,7 @@
 {
   "name": "zerovibe",
   "description": "Создавай приложения с ИИ и публикуй их одной командой на платформе zerovibe: шаблон проекта, дизайн из макета Pencil + чистый CSS, генерация фич, тесты и деплой (install → init → deploy).",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": {
     "name": "zerovibe"
   },
