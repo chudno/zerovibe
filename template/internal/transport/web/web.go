@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/chudno/zerovibe/internal/admin"
 	"github.com/chudno/zerovibe/internal/domain"
 	"github.com/chudno/zerovibe/internal/usecase"
 )
@@ -58,8 +59,13 @@ type Server struct {
 	notes    *usecase.NoteService
 	auth     *usecase.AuthService
 	settings *usecase.SettingsService
+	admin    *admin.Server // встроенная админка (nil → не смонтирована)
 	cfg      Config
 }
+
+// SetAdmin подключает встроенную админку. Её маршруты монтируются в Routes() под
+// защитой роли администратора. nil/пустой реестр → админка не появляется.
+func (s *Server) SetAdmin(a *admin.Server) { s.admin = a }
 
 // NewServer парсит шаблоны и собирает сервер.
 func NewServer(notes *usecase.NoteService, auth *usecase.AuthService, settings *usecase.SettingsService, cfg Config) (*Server, error) {
@@ -106,6 +112,16 @@ func (s *Server) Routes() http.Handler {
 	// Админ (настройки приложения).
 	mux.HandleFunc("GET /admin/settings", s.requireRole(domain.RoleAdmin, s.handleSettingsPage))
 	mux.HandleFunc("PUT /admin/settings", s.requireRole(domain.RoleAdmin, s.handleSetSetting))
+
+	// Встроенная админка (CRUD над сущностями). У неё ОТДЕЛЬНЫЙ вход /admin/login со
+	// своим дизайном (те же учётки, роль admin). Гость/не-админ на /admin/* → редирект
+	// на /admin/login (а не на общий /login приложения). Все CRUD-маршруты — под guard.
+	if s.admin != nil && s.admin.HasResources() {
+		mux.HandleFunc("GET /admin/login", s.handleAdminLoginPage)
+		mux.HandleFunc("POST /admin/login", s.handleAdminLogin)
+		mux.HandleFunc("POST /admin/logout", s.handleAdminLogout)
+		s.admin.Mount(mux, s.requireAdmin)
+	}
 
 	return s.loadUser(mux)
 }
@@ -165,6 +181,24 @@ func (s *Server) requireRole(role domain.Role, next http.HandlerFunc) http.Handl
 			return
 		}
 		next(w, r)
+	}
+}
+
+// requireAdmin — guard для встроенной админки: пускает только админов, а гостя/не-админа
+// отправляет на ОТДЕЛЬНЫЙ вход /admin/login (не на общий /login приложения). Для htmx
+// делает это через HX-Redirect, чтобы переход случился без «застрявшего» фрагмента.
+func (s *Server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if u := currentUser(r); u != nil && u.Role == domain.RoleAdmin {
+			next(w, r)
+			return
+		}
+		if r.Header.Get("HX-Request") == "true" {
+			w.Header().Set("HX-Redirect", "/admin/login")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
 	}
 }
 
@@ -244,6 +278,59 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.setSessionCookie(w, sess)
 	s.redirect(w, r, "/")
+}
+
+// handleAdminLoginPage показывает отдельную форму входа в админку (свой дизайн).
+// Если уже вошёл админом — сразу в /admin.
+func (s *Server) handleAdminLoginPage(w http.ResponseWriter, r *http.Request) {
+	if u := currentUser(r); u != nil && u.Role == domain.RoleAdmin {
+		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+		return
+	}
+	s.admin.RenderLogin(w, "", "")
+}
+
+// handleAdminLogin — вход в админку: те же учётки, что в приложении, но пускаем ТОЛЬКО
+// роль admin. Успех → сессия + переход в /admin (через HX-Redirect, форма на htmx).
+// Не админ или неверные креды → форма входа админки с ошибкой (без перезагрузки).
+func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	email := r.FormValue("email")
+	password := r.FormValue("password")
+	rateKey := domain.NormalizeEmail(email) + "|" + clientIP(r)
+
+	sess, err := s.auth.Login(r.Context(), email, password, rateKey)
+	if err != nil {
+		s.admin.RenderLogin(w, domain.NormalizeEmail(email), "Неверный email или пароль.")
+		return
+	}
+	// Сессия создана — проверяем роль. Не админ: не пускаем в админку (но в приложении
+	// его сессия валидна — кладём cookie и отправляем в приложение, без админ-доступа).
+	u, uerr := s.auth.Authenticate(r.Context(), sess.Token)
+	if uerr != nil || u.Role != domain.RoleAdmin {
+		s.admin.RenderLogin(w, domain.NormalizeEmail(email), "У этой учётной записи нет доступа к админке.")
+		return
+	}
+	s.setSessionCookie(w, sess)
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", "/admin")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// handleAdminLogout выходит из админки и возвращает на её вход.
+func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(s.cfg.CookieName); err == nil {
+		_ = s.auth.Logout(r.Context(), c.Value)
+	}
+	s.clearSessionCookie(w)
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", "/admin/login")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(w, r, "/admin/login", http.StatusSeeOther)
 }
 
 // handleVerifyEmail подтверждает почту по токену из ссылки в письме.

@@ -33,7 +33,7 @@ func NewNoteService(repo NoteRepository) *NoteService {
 
 // Create валидирует ввод через доменный конструктор и сохраняет заметку владельца.
 func (s *NoteService) Create(ctx context.Context, ownerID int64, title, body string) (domain.Note, error) {
-	n, err := domain.NewNote(title, body)
+	n, err := domain.NewNote(title, body, "")
 	if err != nil {
 		return domain.Note{}, err
 	}

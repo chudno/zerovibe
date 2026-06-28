@@ -41,8 +41,8 @@ func (r *NoteRepo) Create(ctx context.Context, n domain.Note) (domain.Note, erro
 		// RETURNING поддерживается SQLite ≥3.35 (есть в modernc) — отдаёт id и
 		// время одним запросом, без отдельного SELECT.
 		err := s.QueryRowContext(ctx,
-			`INSERT INTO notes (owner_id, title, body) VALUES (?, ?, ?) RETURNING id, created_at`,
-			n.OwnerID, n.Title, n.Body,
+			`INSERT INTO notes (owner_id, title, body, due_date) VALUES (?, ?, ?, ?) RETURNING id, created_at`,
+			n.OwnerID, n.Title, n.Body, n.DueDate,
 		).Scan(&n.ID, &created)
 		if err != nil {
 			return fmt.Errorf("insert note: %w", err)
@@ -61,7 +61,7 @@ func (r *NoteRepo) ListByOwner(ctx context.Context, ownerID int64) ([]domain.Not
 	var notes []domain.Note
 	err := r.db.Read(func(s *sql.DB) error {
 		rows, err := s.QueryContext(ctx,
-			`SELECT id, owner_id, title, body, created_at FROM notes WHERE owner_id = ? ORDER BY id DESC`, ownerID)
+			`SELECT id, owner_id, title, body, due_date, created_at FROM notes WHERE owner_id = ? ORDER BY id DESC`, ownerID)
 		if err != nil {
 			return fmt.Errorf("select notes: %w", err)
 		}
@@ -70,7 +70,7 @@ func (r *NoteRepo) ListByOwner(ctx context.Context, ownerID int64) ([]domain.Not
 		for rows.Next() {
 			var n domain.Note
 			var created string
-			if err := rows.Scan(&n.ID, &n.OwnerID, &n.Title, &n.Body, &created); err != nil {
+			if err := rows.Scan(&n.ID, &n.OwnerID, &n.Title, &n.Body, &n.DueDate, &created); err != nil {
 				return fmt.Errorf("scan note: %w", err)
 			}
 			n.CreatedAt = parseTime(created)

@@ -15,7 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chudno/zerovibe/internal/adapter/platformfiles"
 	"github.com/chudno/zerovibe/internal/adapter/platformmail"
+	"github.com/chudno/zerovibe/internal/admin"
+	"github.com/chudno/zerovibe/internal/adminres"
 	"github.com/chudno/zerovibe/internal/platform/db"
 	"github.com/chudno/zerovibe/internal/repository/sqlite"
 	"github.com/chudno/zerovibe/internal/transport/web"
@@ -65,13 +68,17 @@ func run() error {
 
 	// adapters
 	mailer := platformmail.New(platformURL, platformKey)
+	// Файловое хранилище: прод — presigned-URL платформы (S3); локально — каталог
+	// /data/uploads (DB_PATH рядом), раздаётся как /uploads/*.
+	files := platformfiles.New(platformURL, platformKey, env("UPLOADS_DIR", "uploads"))
+	hasher := usecase.NewBcryptHasher()
 
 	// usecase
 	settings := usecase.NewSettingsService(settingRepo)
 	notes := usecase.NewNoteService(noteRepo)
 	auth := usecase.NewAuthService(
 		userRepo, sessRepo, resetRepo, verifyRepo, rlRepo,
-		usecase.NewBcryptHasher(), mailer, settings,
+		hasher, mailer, settings,
 		usecase.AuthConfig{
 			SessionTTL:      30 * 24 * time.Hour,
 			ResetTTL:        time.Hour,
@@ -104,6 +111,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
+	// Встроенная админка: реестр сущностей + generic-CRUD. Регистрируем сущности
+	// приложения (эталон — Note и User). Добавить новую сущность в админку = одна
+	// строка adminres.RegisterX(reg, repo) здесь (см. skill new-feature).
+	reg := admin.NewRegistry()
+	adminres.RegisterUser(reg, userRepo, hasher)
+	adminres.RegisterNote(reg, noteRepo, adminres.UserOptions(userRepo))
+	adminSrv, err := admin.NewServer(reg, files)
+	if err != nil {
+		return err
+	}
+	srv.SetAdmin(adminSrv)
 
 	httpSrv := &http.Server{
 		Addr:              addr,
