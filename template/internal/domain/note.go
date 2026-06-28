@@ -20,15 +20,17 @@ type Note struct {
 	OwnerID   int64 // владелец (пользователь); проставляет usecase из текущей сессии
 	Title     string
 	Body      string
+	DueDate   string // срок (необязательный), формат YYYY-MM-DD; "" = срока нет
 	CreatedAt time.Time
 }
 
 // NewNote — конструктор-валидатор. Все инварианты сущности проверяются здесь,
 // в одном месте: усечение пробелов, обязательность заголовка, лимит длины.
 // ID и CreatedAt проставляются на этапе сохранения (репозиторием/часами).
-func NewNote(title, body string) (Note, error) {
+func NewNote(title, body, dueDate string) (Note, error) {
 	title = strings.TrimSpace(title)
 	body = strings.TrimSpace(body)
+	dueDate = strings.TrimSpace(dueDate)
 
 	if title == "" {
 		return Note{}, ErrValidation{Field: "title", Msg: "заголовок обязателен"}
@@ -39,6 +41,11 @@ func NewNote(title, body string) (Note, error) {
 	if len(body) > 10000 {
 		return Note{}, ErrValidation{Field: "body", Msg: "текст длиннее 10000 символов"}
 	}
+	if dueDate != "" {
+		if _, err := time.Parse("2006-01-02", dueDate); err != nil {
+			return Note{}, ErrValidation{Field: "due_date", Msg: "некорректная дата (нужен формат ГГГГ-ММ-ДД)"}
+		}
+	}
 
-	return Note{Title: title, Body: body}, nil
+	return Note{Title: title, Body: body, DueDate: dueDate}, nil
 }
