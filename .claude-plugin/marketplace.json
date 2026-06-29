@@ -8,8 +8,8 @@
     {
       "name": "zerovibe",
       "source": {
-        "source": "github",
-        "repo": "chudno/zerovibe"
+        "source": "git",
+        "url": "https://github.com/chudno/zerovibe.git"
       },
       "description": "Создавай приложения с ИИ и публикуй на платформе Zerovibe одной командой (install → new → deploy)."
     }
